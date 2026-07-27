@@ -1,0 +1,17 @@
+export(boot.t.test)
+export(boot.cor.test)
+export(boot.lm)
+export(boot.glm)
+export(boot.ci)
+
+S3method(summary, boot.lm)
+S3method(print, summary.boot.lm)
+S3method(summary, boot.glm)
+S3method(print, summary.boot.glm)
+
+S3method(boot.ci, default)
+S3method(boot.ci, htest)
+S3method(boot.ci, lm)
+S3method(boot.ci, glm)
+
+importFrom(stats, setNames)

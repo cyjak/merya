@@ -1,0 +1,9 @@
+^\.git$
+^\.gitignore$
+^\.github$
+^README\.Rmd$
+^\.Rproj\.user$
+^.*\.Rproj$
+^cran-comments\.md$
+^LICENSE\.md$
+^\.travis\.yml$

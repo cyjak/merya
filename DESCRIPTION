@@ -2,7 +2,7 @@ Package: merya
 Type: Package
 Title: Fast BCa Bootstrap Confidence Intervals and CI-Inversion P-Values
     for Common Statistical Tests and Models
-Version: 0.6.0
+Version: 0.7.0
 Authors@R: person(given = "Your", family = "Name",
     email = "you@example.com", role = c("aut", "cre"))
 Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
@@ -15,23 +15,25 @@ Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
     working. boot.lm() can additionally report, for each predictor, its
     partial correlation, partial eta-squared, or eta-squared (with BCa
     confidence intervals and CI-inversion p-values) instead of its slope
-    coefficient, and boot.glm() can report a binomial model's marginal
-    risk ratio or risk difference for a given binary predictor via
-    g-computation. A single generic, boot.ci(), also takes an object
-    already produced by t.test(), cor.test(), lm(), or glm() and returns
-    it with the same BCa/CI-inversion inference substituted in, using the
-    exact same internal computation as the corresponding boot.*()
-    function. All bootstrap-based functions default to 10000 resamples
-    and to a fixed seed of 123 for reproducibility (settable to any other
-    integer, or to NULL to use whatever random state is currently active
-    instead of reseeding). The bootstrap resampling, BCa transform, and
-    CI-inversion p-value machinery is implemented entirely in base R
-    (using only the 'stats' and 'utils' packages that ship with every R
-    installation, with no other dependencies); resampling is vectorized
-    wherever a closed-form statistic allows it, and the BCa transform is
-    inverted analytically for p-values (no bisection / root-finding),
-    which keeps the bootstrap and p-value calculations fast even for
-    large numbers of replicates.
+    coefficient, and optionally a bootstrapped, leave-one-out predicted
+    R-squared for the model as a whole. boot.glm() can report odds
+    ratios, conditional or marginal (g-computation) risk ratios, marginal
+    risk differences, or the population attributable fraction, in place
+    of its raw coefficients. A single generic, boot.ci(), also takes an
+    object already produced by t.test(), cor.test(), lm(), or glm() and
+    returns it with the same BCa/CI-inversion inference substituted in,
+    using the exact same internal computation as the corresponding
+    boot.*() function. All bootstrap-based functions default to 10000
+    resamples and to a fixed seed of 123 for reproducibility (settable to
+    any other integer, or to NULL to use whatever random state is
+    currently active instead of reseeding). The bootstrap resampling,
+    BCa transform, and CI-inversion p-value machinery is implemented
+    entirely in base R (using only the 'stats' and 'utils' packages that
+    ship with every R installation, with no other dependencies);
+    resampling is vectorized wherever a closed-form statistic allows it,
+    and the BCa transform is inverted analytically for p-values (no
+    bisection / root-finding), which keeps the bootstrap and p-value
+    calculations fast even for large numbers of replicates.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 3.5.0)

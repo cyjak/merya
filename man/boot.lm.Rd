@@ -11,13 +11,14 @@ accelerated (BCa) confidence intervals and CI-inversion p-values,
 retrievable via \code{summary()}. By default the bootstrapped quantity is
 the slope coefficients (as before); set \code{effect} to instead report,
 for each predictor, its partial correlation, partial eta-squared, or
-eta-squared.
+eta-squared; optionally also report a bootstrap predicted (leave-one-out)
+R-squared.
 }
 \usage{
 boot.lm(formula, data, subset, weights, na.action, offset,
         conf.level = 0.95, R = 10000,
         effect = c("coef", "partial.cor", "partial.eta2", "eta2"),
-        seed = 123, \dots)
+        pred.r.squared = FALSE, seed = 123, \dots)
 
 \method{summary}{boot.lm}(object, \dots)
 
@@ -39,6 +40,10 @@ boot.lm(formula, data, subset, weights, na.action, offset,
     share of the total variance in the response). The intercept is
     never reported for the three effect-size options (only for
     \code{"coef"}).}
+  \item{pred.r.squared}{logical; if \code{TRUE}, additionally compute a
+    predicted R-squared (leave-one-out cross-validated), reported
+    alongside whichever \code{effect} was requested. \code{FALSE} by
+    default (not computed). See Details.}
   \item{seed}{integer seed used to make the bootstrap resampling
     reproducible; set via \code{\link[base]{set.seed}} at the start of
     the function. Defaults to \code{123}; pass \code{NULL} to use
@@ -63,39 +68,47 @@ for the jackknife step.
 predictor's t-statistic and \code{df} the residual degrees of freedom
 (both from the replicate's own refit); the semi-partial ("part")
 correlation additionally rescales by \code{sqrt(1 - R^2)} of that same
-refit. Both come directly from quantities already produced by the same
-per-replicate Cholesky solve used for \code{"coef"} (no separate reduced-
-model refits are needed), and their jackknife (for the BCa acceleration
-constant) is likewise closed-form, extending the same leave-one-out
-identities used for \code{"coef"} (leave-one-out RSS via the PRESS
-identity, leave-one-out \eqn{(X'X)^{-1}} via a rank-one/Sherman-Morrison
-update, and a closed-form leave-one-out total sum of squares) -- so,
-exactly as for \code{"coef"}, no observation or replicate is ever refit
-for the jackknife step.
+refit. Because partial eta-squared and eta-squared are squares of a
+statistic that can be negative, their confidence intervals are built by
+first computing the BCa interval on the signed (partial/semi-partial
+correlation) scale, then converting to the squared scale by taking the
+smallest absolute value attained within that interval as the lower
+bound (0 whenever the signed interval straddles zero) and the largest
+absolute value as the upper bound, and squaring both.
 
-Because partial eta-squared and eta-squared are \emph{squares} of a
-statistic that can be negative, their confidence intervals are built in
-two steps: first the BCa interval is computed on the signed (partial/
-semi-partial correlation) scale, exactly as for \code{"partial.cor"};
-then that signed interval is converted to the squared scale by taking
-the smallest absolute value attained within it as the lower bound (0
-whenever the signed interval straddles zero) and the largest absolute
-value as the upper bound, and squaring both -- rather than naively
-squaring the signed endpoints, which would misrepresent the interval
-whenever it straddles zero. The p-value (by CI inversion) is computed
-once, on the signed scale, since squaring is monotonic in absolute value
-and does not change which side of zero a replicate falls on.
+\strong{\code{pred.r.squared = TRUE}}: for each observation \eqn{j}, its
+leave-one-out predicted value is \eqn{x_j'\hat\beta_{(-j)}}, where
+\eqn{\hat\beta_{(-j)}} is the coefficient vector from the same model
+refit excluding observation \eqn{j} -- obtained in closed form via the
+hat-matrix identity (no refitting), the same one used for \code{effect =
+"coef"}'s BCa acceleration constant. The (signed) correlation between
+the observed response and these leave-one-out predictions is
+bootstrapped (each replicate resamples rows, refits, and repeats the
+same leave-one-out-within-the-replicate calculation on its own resampled
+data) and given a BCa confidence interval and CI-inversion p-value
+exactly as for the signed statistics underlying
+\code{"partial.eta2"}/\code{"eta2"}; predicted R-squared is then this
+correlation's square, with its confidence interval obtained the same way
+(BCa interval on the signed correlation, converted to the squared scale
+by taking the smallest/largest absolute value attained within it as the
+new lower/upper bound before squaring). The BCa acceleration constant
+for the signed correlation itself is approximated with a fast
+closed-form "delete-one-pair" leave-one-out correlation (excluding one
+(response, leave-one-out-prediction) pair at a time from the full-sample
+leave-one-out predictions, rather than a full nested double-jackknife).
 }
 \value{
 An object of class \code{c("boot.lm", "lm")}: identical to what
 \code{\link[stats]{lm}} returns, with an additional \code{boot} element
 (the bootstrap replicates of whichever quantity \code{effect} selected,
-its BCa CIs, CI-inversion p-values, \code{R}, and \code{effect} itself).
-All standard \code{lm} methods (\code{predict}, \code{fitted},
+its BCa CIs, CI-inversion p-values, \code{R}, \code{effect} itself, and,
+if \code{pred.r.squared = TRUE}, a \code{pred.r.squared} sub-list). All
+standard \code{lm} methods (\code{predict}, \code{fitted},
 \code{residuals}, \code{plot}, ...) keep working unchanged, regardless of
 \code{effect}; use \code{summary()} to see the bootstrap inference table
 (columns \code{Estimate}, \code{CI lower}, \code{CI upper}, and
-\code{Pr(>|z|)}).
+\code{Pr(>|z|)}; no separate bootstrap standard error column), plus the
+predicted R-squared line when requested.
 }
 \examples{
 fit <- boot.lm(mpg ~ wt + hp, data = mtcars, R = 500)
@@ -104,6 +117,9 @@ summary(fit)
 ## partial correlations / effect sizes instead of slopes
 summary(boot.lm(mpg ~ wt + hp, data = mtcars, R = 500, effect = "partial.cor"))
 summary(boot.lm(mpg ~ wt + hp, data = mtcars, R = 500, effect = "eta2"))
+
+## also report predicted (leave-one-out) R-squared
+summary(boot.lm(mpg ~ wt + hp, data = mtcars, R = 500, pred.r.squared = TRUE))
 }
 \seealso{
 \code{\link[stats]{lm}}

@@ -1,3 +1,50 @@
+# merya 0.7.0
+
+* **`boot.glm()`'s `effect` argument is reworked and gains two new
+  options**; the accepted values are now spelled `"coef"` (unchanged),
+  `"OR"`, `"RR"`, `"RD"`, and `"PAF"` (previously lowercase `"rr"`/
+  `"rd"`, which no longer match -- this is a breaking rename).
+  - `"OR"` (new): odds ratio. Reuses the *exact same* bootstrap/
+    jackknife coefficient replicates as `"coef"` and simply reports
+    `exp(estimate)`/`exp(CI)`; the p-value is left untouched (computed
+    on the coefficient scale, which is equivalent since exponentiation
+    doesn't change which side of the null a replicate falls on).
+    Requires `family = binomial(link = "logit")`.
+  - `"RR"`: if `exposure` is `NULL`, reports the *conditional* risk
+    ratio for every predictor the same way `"OR"` reports odds ratios
+    (exponentiated coefficient/CI, untouched p-value); this requires a
+    log link, but now works with **any** family (e.g.
+    `binomial(link = "log")`, `poisson(link = "log")`), not just
+    binomial. If `exposure` is given, always reports the *marginal*
+    risk ratio for that predictor via g-computation (as before),
+    regardless of link function; this still requires
+    `family = binomial()`.
+  - `"RD"`: unchanged (marginal risk difference via g-computation,
+    `family = binomial()`, `exposure` required).
+  - `"PAF"` (new): population attributable fraction, for every simple
+    (non-interaction, untransformed) predictor term, via g-computation:
+    the observed prevalence is compared against the counterfactual
+    prevalence obtained by setting that one term to its reference
+    category for everyone (categorical predictors) or to the sample
+    mean for everyone (continuous predictors), leaving all other
+    covariates as observed. Multi-level categorical predictors
+    contribute a single row. Requires `family = binomial()`; errors if
+    any interaction or transformed term (e.g. `poly()`, `log()`) is
+    present in the formula, since the counterfactual has no unambiguous
+    meaning for those. `exposure` is not used for `"PAF"`.
+* **`boot.lm()` gains a `pred.r.squared` argument** (`FALSE` by
+  default): when `TRUE`, additionally computes a leave-one-out
+  "predicted R-squared" -- the squared correlation between the observed
+  response and, for every observation, its predicted value from the
+  same model refit excluding that observation (obtained in closed form
+  via the hat-matrix identity, no refitting) -- with a BCa confidence
+  interval and CI-inversion p-value, reported alongside whichever
+  `effect` was requested. As with `"partial.eta2"`/`"eta2"`, the CI is
+  first computed on the signed (non-squared) correlation and then
+  converted to the squared scale by taking the smallest/largest
+  absolute value attained within the signed interval as the new
+  lower/upper bound before squaring.
+
 # merya 0.6.0
 
 * **`boot.gee()` has been removed from the package**, along with its

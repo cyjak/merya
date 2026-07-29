@@ -29,6 +29,10 @@
 #'   share of the total variance in the response). The intercept is
 #'   never reported for the three effect-size options (only for
 #'   \code{"coef"}).
+#' @param pred.r.squared logical; if \code{TRUE}, additionally compute a
+#'   predicted R-squared (leave-one-out cross-validated), reported
+#'   alongside whichever \code{effect} was requested. \code{FALSE} by
+#'   default (not computed). See Details.
 #' @param ... further arguments passed to \code{\link[stats]{lm}} (e.g.
 #'   \code{contrasts}).
 #'
@@ -79,6 +83,29 @@
 #'   scale, since squaring is monotonic in absolute value and does not
 #'   change which side of zero a replicate falls on.
 #'
+#'   \strong{\code{pred.r.squared = TRUE}}: for each observation \eqn{j},
+#'   its leave-one-out predicted value is \eqn{x_j'\hat\beta_{(-j)}},
+#'   where \eqn{\hat\beta_{(-j)}} is the coefficient vector from the same
+#'   model refit excluding observation \eqn{j} -- obtained in closed form
+#'   via the hat-matrix identity (no refitting), the same one used for
+#'   \code{effect = "coef"}'s BCa acceleration constant. The (signed)
+#'   correlation between the observed response and these leave-one-out
+#'   predictions is bootstrapped (each replicate resamples rows, refits,
+#'   and repeats the same leave-one-out-within-the-replicate calculation
+#'   on its own resampled data) and given a BCa confidence interval and
+#'   CI-inversion p-value exactly as for the signed statistics underlying
+#'   \code{"partial.eta2"}/\code{"eta2"}; predicted R-squared is then
+#'   this correlation's square, with its confidence interval obtained the
+#'   same way (BCa interval on the signed correlation, converted to the
+#'   squared scale by taking the smallest/largest absolute value attained
+#'   within it as the new lower/upper bound before squaring). The BCa
+#'   acceleration constant for the signed correlation itself is
+#'   approximated with a fast closed-form "delete-one-pair" leave-one-out
+#'   correlation (excluding one (response, leave-one-out-prediction) pair
+#'   at a time from the full-sample leave-one-out predictions, rather
+#'   than a full nested double-jackknife), consistent with the
+#'   closed-form/one-step approximations used throughout this package.
+#'
 #' @examples
 #' fit <- boot.lm(mpg ~ wt + hp, data = mtcars, R = 500)
 #' summary(fit)
@@ -87,12 +114,15 @@
 #' summary(boot.lm(mpg ~ wt + hp, data = mtcars, R = 500, effect = "partial.cor"))
 #' summary(boot.lm(mpg ~ wt + hp, data = mtcars, R = 500, effect = "eta2"))
 #'
+#' ## also report predicted (leave-one-out) R-squared
+#' summary(boot.lm(mpg ~ wt + hp, data = mtcars, R = 500, pred.r.squared = TRUE))
+#'
 #' @seealso \code{\link[stats]{lm}}
 #' @export
 boot.lm <- function(formula, data, subset, weights, na.action, offset,
                      conf.level = 0.95, R = 10000,
                      effect = c("coef", "partial.cor", "partial.eta2", "eta2"),
-                     seed = 123, ...) {
+                     pred.r.squared = FALSE, seed = 123, ...) {
   if (!is.null(seed)) set.seed(seed)
   effect <- match.arg(effect)
   cl <- match.call()
@@ -117,6 +147,7 @@ boot.lm <- function(formula, data, subset, weights, na.action, offset,
   lm_call$conf.level <- NULL
   lm_call$R <- NULL
   lm_call$effect <- NULL
+  lm_call$pred.r.squared <- NULL
   lm_call$seed <- NULL
   fit <- eval(lm_call, parent.frame())
   fit$call <- cl
@@ -138,30 +169,20 @@ boot.lm <- function(formula, data, subset, weights, na.action, offset,
   XtX_inv <- tryCatch(chol2inv(chol(crossprod(Xs))),
                        error = function(e) MASS_ginv_fallback(crossprod(Xs)))
 
+  ## shared by effect = "coef" and by pred.r.squared (leave-one-out OLS
+  ## coefficients, closed-form via the hat-matrix identity -- no refits)
+  need_loo_coef <- (effect == "coef") || isTRUE(pred.r.squared)
+  loo_coef <- if (need_loo_coef) .jack_lm_coef(Xs, ys, beta_hat, XtX_inv) else NULL
+
   if (effect == "coef") {
     boot_coef <- .boot_lm_coef(Xs, ys, R)
-    loo_coef  <- .jack_lm_coef(Xs, ys, beta_hat, XtX_inv)
-
-    ci <- matrix(NA_real_, nrow = p, ncol = 2,
-                 dimnames = list(names(beta_hat), c("lower", "upper")))
-    pval <- setNames(numeric(p), names(beta_hat))
-    for (j in seq_len(p)) {
-      ok <- stats::complete.cases(boot_coef[, j])
-      tb <- boot_coef[ok, j]
-      if (length(tb) < 10) {
-        ci[j, ] <- c(NA, NA); pval[j] <- NA
-        next
-      }
-      out <- .bca_ci(tb, beta_hat[j], loo_coef[, j], conf.level)
-      ci[j, ] <- as.numeric(out)
-      pval[j] <- .bca_pvalue(0, tb, beta_hat[j], attr(out, "a"), "two.sided")
-    }
+    tbl <- .coef_bca_table(boot_coef, loo_coef, beta_hat, conf.level)
 
     fit$boot <- list(
       effect       = "coef",
       coefficients = boot_coef,
-      conf.int     = ci,
-      p.value      = pval,
+      conf.int     = tbl$conf.int,
+      p.value      = tbl$p.value,
       conf.level   = conf.level,
       R            = R
     )
@@ -230,6 +251,33 @@ boot.lm <- function(formula, data, subset, weights, na.action, offset,
     )
   }
 
+  if (isTRUE(pred.r.squared)) {
+    pred_loo_full <- rowSums(Xs * loo_coef)
+    theta_hat_predR <- stats::cor(ys, pred_loo_full)
+
+    boot_predR <- .boot_lm_predR(Xs, ys, R)
+    loo_predR  <- .loo_cor_exclude_pairs(ys, pred_loo_full)
+
+    ok <- stats::complete.cases(boot_predR)
+    tb <- boot_predR[ok]
+    if (length(tb) < 10 || is.na(theta_hat_predR)) {
+      ci_predR <- c(NA_real_, NA_real_)
+      pval_predR <- NA_real_
+    } else {
+      out <- .bca_ci(tb, theta_hat_predR, loo_predR, conf.level)
+      ci_predR <- .signed_ci_to_squared(as.numeric(out))
+      pval_predR <- .bca_pvalue(0, tb, theta_hat_predR, attr(out, "a"), "two.sided")
+    }
+
+    fit$boot$pred.r.squared <- list(
+      estimate   = theta_hat_predR^2,
+      conf.int   = matrix(ci_predR, nrow = 1L, dimnames = list("pred.r.squared", c("lower", "upper"))),
+      p.value    = pval_predR,
+      conf.level = conf.level,
+      R          = R
+    )
+  }
+
   class(fit) <- c("boot.lm", class(fit))
   fit
 }
@@ -263,6 +311,7 @@ summary.boot.lm <- function(object, ...) {
   s$conf.level <- b$conf.level
   s$R <- b$R
   s$effect <- effect
+  s$pred.r.squared <- b$pred.r.squared
   class(s) <- c("summary.boot.lm", class(s))
   s
 }
@@ -291,5 +340,17 @@ print.summary.boot.lm <- function(x, digits = max(3L, getOption("digits") - 3L),
   cat(sprintf("Multiple R-squared: %s,  Adjusted R-squared: %s\n",
               format(signif(x$r.squared, digits)),
               format(signif(x$adj.r.squared, digits))))
+  if (!is.null(x$pred.r.squared)) {
+    pr <- x$pred.r.squared
+    cat(sprintf(
+      "Predicted R-squared (leave-one-out, BCa bootstrap, R = %d, %.0f%% CI; ",
+      pr$R, 100 * pr$conf.level))
+    cat(sprintf(
+      "p-value via CI inversion):\n  %s  [%s, %s]  p = %s\n",
+      format(signif(pr$estimate, digits)),
+      format(signif(pr$conf.int[1L, "lower"], digits)),
+      format(signif(pr$conf.int[1L, "upper"], digits)),
+      format(signif(pr$p.value, digits))))
+  }
   invisible(x)
 }

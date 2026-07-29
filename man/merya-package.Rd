@@ -30,13 +30,17 @@ their original counterparts as closely as possible:
     inference table available through \code{summary()}. By default
     reports the slope coefficients; can instead report, per predictor,
     the partial correlation, partial eta-squared, or eta-squared (see
-    \code{effect} in \code{\link{boot.lm}}).
+    \code{effect} in \code{\link{boot.lm}}), and can optionally also
+    report a leave-one-out predicted R-squared for the model as a whole
+    (see \code{pred.r.squared}).
   \item \code{\link{boot.glm}} -- like \code{\link[stats]{glm}}, returns
     a \code{"glm"} object (subclassed \code{"boot.glm"}) with a bootstrap
-    inference table available through \code{summary()}. For a binomial
-    model, can instead report the marginal risk ratio or risk difference
-    for a given binary predictor via g-computation (see \code{effect}
-    and \code{exposure} in \code{\link{boot.glm}}).
+    inference table available through \code{summary()}. By default
+    reports the model coefficients; can instead report odds ratios,
+    conditional or marginal (g-computation) risk ratios, the marginal
+    risk difference for a binary predictor, or the population
+    attributable fraction for every eligible predictor (see
+    \code{effect} and \code{exposure} in \code{\link{boot.glm}}).
   \item \code{\link{boot.ci}} -- a generic that takes an object already
     produced by \code{t.test()}, \code{cor.test()}, \code{lm()}, or
     \code{glm()} and returns it with BCa/CI-inversion inference
@@ -55,10 +59,12 @@ Every function is written for speed:
     matrix rather than in an R-length loop;
   \item statistics that admit a closed form (means, mean differences,
     Pearson/Spearman correlations, OLS/GLM coefficients, partial and
-    semi-partial correlations, g-computed risk ratios/differences) are
-    computed with vectorized matrix/columnwise operations, from each
-    replicate's own single refit -- no separate reduced-model refits are
-    needed for the effect-size or g-computation options;
+    semi-partial correlations, leave-one-out predictions, exponentiated
+    coefficients, g-computed risk ratios/differences/attributable
+    fractions) are computed with vectorized matrix/columnwise
+    operations, from each replicate's own single refit -- no separate
+    reduced-model refits are needed for any effect-size, odds/risk-ratio,
+    or g-computation option;
   \item the BCa acceleration constant is obtained from closed-form or
     one-step (infinitesimal jackknife) leave-one-out formulas, avoiding
     n full refits;

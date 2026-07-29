@@ -5,10 +5,9 @@
 #' additionally performs a case-resampling bootstrap and attaches
 #' bias-corrected and accelerated (BCa) confidence intervals and
 #' CI-inversion p-values, retrievable via \code{summary()}. By default the
-#' bootstrapped quantity is the model coefficients (as before); for a
-#' binomial model, set \code{effect} to instead report a marginal
-#' (population-averaged) risk ratio or risk difference for a given binary
-#' predictor, obtained by g-computation.
+#' bootstrapped quantity is the model coefficients (as before); \code{effect}
+#' can instead request odds ratios, risk ratios/differences, or the
+#' population attributable fraction -- see Details.
 #'
 #' @param formula an object of class \code{"formula"}, as in \code{glm}.
 #' @param family as in \code{\link[stats]{glm}} (e.g. \code{binomial()},
@@ -28,18 +27,34 @@
 #'   typically reached in a handful of iterations.
 #' @param irls.tol relative convergence tolerance on the coefficient
 #'   update between IRLS iterations. Default \code{1e-8}.
-#' @param effect which quantity to bootstrap and report: \code{"coef"}
-#'   (default) for the ordinary model coefficients; \code{"rr"} for the
-#'   marginal (population-averaged) risk ratio associated with
-#'   \code{exposure}, obtained by g-computation; or \code{"rd"} for the
-#'   corresponding marginal risk difference. \code{"rr"}/\code{"rd"} are
-#'   only available when \code{family} is binomial.
+#' @param effect which quantity to bootstrap and report:
+#'   \describe{
+#'     \item{\code{"coef"}}{(default) the ordinary model coefficients.}
+#'     \item{\code{"OR"}}{odds ratios: the exact same bootstrap/jackknife
+#'       coefficient replicates as \code{"coef"}, simply exponentiated
+#'       (estimate and CI); the p-value is untouched. Requires
+#'       \code{family = binomial(link = "logit")}.}
+#'     \item{\code{"RR"}}{risk ratio. If \code{exposure} is \code{NULL},
+#'       reports the *conditional* risk ratio for every predictor as the
+#'       exponentiated coefficient (again the same replicates as
+#'       \code{"coef"}, just exponentiated, p-value untouched); this
+#'       requires a log link (any family, e.g. \code{binomial(link =
+#'       "log")} or \code{poisson(link = "log")}). If \code{exposure} is
+#'       given, instead reports the *marginal* risk ratio for that one
+#'       binary predictor via g-computation (as for \code{"RD"} below);
+#'       this requires \code{family = binomial()} (any link).}
+#'     \item{\code{"RD"}}{the marginal risk difference for
+#'       \code{exposure} via g-computation; requires \code{family =
+#'       binomial()} and a non-\code{NULL} \code{exposure}.}
+#'     \item{\code{"PAF"}}{the population attributable fraction for every
+#'       eligible predictor term via g-computation; requires \code{family
+#'       = binomial()}. \code{exposure} is not used.}
+#'   }
 #' @param exposure the name (character string) of a single binary
-#'   predictor in \code{formula} for which the marginal risk ratio/
-#'   difference is computed; required (and only used) when
-#'   \code{effect} is \code{"rr"} or \code{"rd"}. Must correspond to a
-#'   two-level factor or a 0/1-coded main-effect term (no interactions);
-#'   see Details.
+#'   predictor in \code{formula}; required for \code{effect = "RD"},
+#'   optional for \code{effect = "RR"} (see above), and unused otherwise.
+#'   Must correspond to a two-level factor or a 0/1-coded main-effect
+#'   term (no interactions); see Details.
 #' @param ... further arguments passed to \code{\link[stats]{glm}} for
 #'   the single full-data fit (e.g. \code{contrasts}); does not affect
 #'   the bootstrap replicates.
@@ -47,67 +62,103 @@
 #' @return An object of class \code{c("boot.glm", "glm", "lm")}: identical
 #'   to what \code{\link[stats]{glm}} returns, with an additional
 #'   \code{boot} element (the bootstrap replicates of whichever quantity
-#'   \code{effect} selected, its BCa CI, CI-inversion p-value, \code{R},
-#'   and \code{effect} itself). All standard \code{glm} methods keep
-#'   working unchanged, regardless of \code{effect}; use \code{summary()}
-#'   for the bootstrap inference table.
+#'   \code{effect} selected, its BCa CI(s), CI-inversion p-value(s),
+#'   \code{R}, and \code{effect} itself). All standard \code{glm} methods
+#'   keep working unchanged, regardless of \code{effect}; use
+#'   \code{summary()} for the bootstrap inference table (columns
+#'   \code{Estimate}, \code{CI lower}, \code{CI upper}, and
+#'   \code{Pr(>|z|)}; no separate bootstrap standard error column).
 #'
 #' @details \strong{\code{effect = "coef"}} (default): each bootstrap
 #'   replicate is refit with a lean, hand-rolled IRLS solver (not
 #'   \code{stats::glm.fit()}), warm-started from the full-data MLE
-#'   coefficients. \code{stats::glm.fit()} is comparatively costly to call
-#'   \code{R} times because every call revalidates inputs, tracks
-#'   deviance with step-halving checks at every iteration, solves via a
-#'   full rank-revealing QR decomposition, and builds a complete result
-#'   object -- all overhead that is unnecessary when only the coefficient
-#'   vector of each replicate is needed. The internal solver instead:
-#'   warm-starts from the MLE (so convergence typically takes 2-4
-#'   iterations rather than glm.fit's ~6-10 from a cold start), solves
-#'   the weighted normal equations with a Cholesky factorization and two
-#'   backsolves, and checks convergence via the size of the coefficient
-#'   update rather than recomputing the deviance. The special case
-#'   \code{family = gaussian(link = "identity")} skips iteration entirely
-#'   and solves the (weighted) normal equations exactly in one step. The
+#'   coefficients, converging in a handful of iterations. The
 #'   acceleration constant for the BCa interval is approximated from a
 #'   one-step Newton (infinitesimal jackknife) update using the converged
 #'   IRLS working weights, avoiding n full leave-one-out refits.
 #'
-#'   \strong{\code{effect = "rr"} / \code{"rd"}} (binomial only):
-#'   g-computation ("standardization") estimates the marginal effect of
-#'   \code{exposure} by predicting, for every row of the data, the
-#'   response probability that model would give if that row's exposure
-#'   were set to 1, and again as if it were set to 0 -- leaving every
-#'   other covariate at its observed value -- and averaging each set of
-#'   predictions over the whole sample: \eqn{R_1 = \mathrm{mean}(\hat p_i
-#'   \mid \mathrm{exposure}_i = 1)}, \eqn{R_0 = \mathrm{mean}(\hat p_i
-#'   \mid \mathrm{exposure}_i = 0)}. The marginal risk ratio is
-#'   \eqn{R_1 / R_0} and the marginal risk difference is \eqn{R_1 - R_0}.
-#'   Each bootstrap replicate resamples whole rows (outcome and
-#'   covariates together), refits the same lean IRLS solver used for
-#'   \code{"coef"}, and then repeats the standardization step within
-#'   that replicate's own resampled covariate distribution -- the
-#'   standard nonparametric bootstrap for a g-computed effect. The BCa
+#'   \strong{\code{effect = "OR"}} and the conditional-risk-ratio form of
+#'   \strong{\code{effect = "RR"}} (\code{exposure = NULL}): these reuse
+#'   the identical bootstrap/jackknife coefficient replicates as
+#'   \code{"coef"} -- no separate resampling is done -- and simply report
+#'   \code{exp(estimate)}/\code{exp(CI)} instead of the raw coefficient
+#'   and its CI. Because the BCa interval's endpoints are specific
+#'   (bias-and-acceleration-corrected) quantiles of the bootstrap
+#'   distribution, and \code{exp()} is monotonic, exponentiating those
+#'   endpoints gives the exact corresponding BCa interval on the
+#'   OR/RR scale -- there is no need to (and this does not) rebuild the
+#'   BCa calculation from an exponentiated bootstrap distribution. The
+#'   p-value is left as computed on the coefficient scale (testing
+#'   coefficient = 0, equivalently OR/RR = 1), since exponentiation does
+#'   not change which side of the null a replicate falls on.
+#'
+#'   \strong{The g-computation form of \code{effect = "RR"}}
+#'   (\code{exposure} given) \strong{, \code{effect = "RD"}, and
+#'   \code{effect = "PAF"}}: all three use g-computation
+#'   ("standardization"). For \code{"RR"}/\code{"RD"}, every row's
+#'   \code{exposure} is set to 1 for everyone, then to 0 for everyone
+#'   (leaving every other covariate at its observed value), giving
+#'   population-averaged risks \eqn{R_1 = \mathrm{mean}(\hat p_i \mid
+#'   \mathrm{exposure}_i = 1)} and \eqn{R_0 = \mathrm{mean}(\hat p_i \mid
+#'   \mathrm{exposure}_i = 0)}; the marginal risk ratio is
+#'   \eqn{R_1 / R_0} and the marginal risk difference is
+#'   \eqn{R_1 - R_0}. For \code{"PAF"}, the true (observed) prevalence
+#'   \eqn{P} is compared, for every eligible predictor term \eqn{i} in
+#'   turn, against the counterfactual prevalence \eqn{P_i} obtained by
+#'   setting that one term to its reference category for everyone (all
+#'   of its design-matrix dummy columns to 0) if it is categorical, or to
+#'   the sample mean for everyone if it is continuous, again leaving all
+#'   other covariates as observed; the population attributable fraction
+#'   is \eqn{\mathrm{PAF}_i = (P - P_i) / P}. Multi-level categorical
+#'   predictors contribute a single row (one counterfactual scenario:
+#'   everyone at the reference level), and only simple, untransformed,
+#'   non-interaction predictor terms are supported for \code{"PAF"} (a
+#'   term must match a raw column name in \code{data}; interactions or
+#'   transformations such as \code{poly()}/\code{log()} raise an error).
+#'
+#'   For all three g-computation cases, each bootstrap replicate
+#'   resamples whole rows (outcome and covariates together), refits the
+#'   same lean IRLS solver used for \code{"coef"}, and repeats the
+#'   standardization step within that replicate's own resampled
+#'   covariate distribution and refit coefficients -- the standard
+#'   nonparametric bootstrap for a g-computed effect. The BCa
 #'   acceleration constant uses a closed-form (no-refit) leave-one-out
 #'   approximation built from the same one-step Newton update used for
-#'   \code{"coef"}, applied to the g-computation formula above. The
-#'   p-value is obtained by CI inversion against the natural null value
-#'   for each scale (1 for the risk ratio, 0 for the risk difference).
-#'   \code{exposure} must resolve to exactly one design-matrix column
-#'   (a plain 0/1 numeric/logical variable, or a two-level factor with
-#'   the usual treatment contrasts) -- multi-level factors, interactions
-#'   involving \code{exposure}, or non-0/1-coded columns are not
-#'   supported and raise an error.
+#'   \code{"coef"} (for \code{"PAF"}'s continuous-predictor recipes, the
+#'   reference value used in this jackknife step is fixed at the
+#'   full-data mean rather than recomputed per leave-one-out pseudo-
+#'   replicate -- a small approximation that keeps the computation fully
+#'   vectorized). The p-value is obtained by CI inversion against the
+#'   natural null value for each scale (1 for the risk ratio, 0 for the
+#'   risk difference or the attributable fraction). \code{exposure} must
+#'   resolve to exactly one design-matrix column (a plain 0/1
+#'   numeric/logical variable, or a two-level factor with the usual
+#'   treatment contrasts) -- multi-level factors, interactions involving
+#'   \code{exposure}, or non-0/1-coded columns are not supported and
+#'   raise an error.
 #'
 #' @examples
 #' fit <- boot.glm(am ~ wt + hp, data = mtcars, family = binomial(), R = 500)
 #' summary(fit)
 #'
+#' ## odds ratios (requires a logit link)
+#' summary(boot.glm(am ~ wt + hp, data = mtcars, family = binomial(),
+#'                   R = 500, effect = "OR"))
+#'
+#' ## conditional risk ratios for every predictor (requires a log link)
+#' summary(boot.glm(am ~ wt + hp, data = mtcars, family = binomial(link = "log"),
+#'                   R = 500, effect = "RR"))
+#'
 #' ## marginal risk ratio / risk difference for a binary predictor,
 #' ## via g-computation
 #' d <- mtcars; d$vs <- factor(d$vs)
 #' rr_fit <- boot.glm(am ~ vs + wt, data = d, family = binomial(),
-#'                     R = 500, effect = "rr", exposure = "vs")
+#'                     R = 500, effect = "RR", exposure = "vs")
 #' summary(rr_fit)
+#'
+#' ## population attributable fraction for every eligible predictor
+#' summary(boot.glm(am ~ vs + wt, data = d, family = binomial(),
+#'                   R = 500, effect = "PAF"))
 #'
 #' @seealso \code{\link[stats]{glm}}
 #' @export
@@ -115,8 +166,8 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
                       weights, na.action, offset,
                       conf.level = 0.95, R = 10000,
                       irls.maxit = 25L, irls.tol = 1e-8,
-                      effect = c("coef", "rr", "rd"), exposure = NULL,
-                      seed = 123, ...) {
+                      effect = c("coef", "OR", "RR", "RD", "PAF"),
+                      exposure = NULL, seed = 123, ...) {
   if (!is.null(seed)) set.seed(seed)
   effect <- match.arg(effect)
   cl <- match.call()
@@ -141,7 +192,28 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
   if (is.character(family)) family <- get(family, mode = "function")
   if (is.function(family)) family <- family()
 
-  if (effect != "coef") {
+  ## ---- validate the effect/family/link/exposure combination up front ----
+  use_gcomp_rr_rd <- (effect == "RD") || (effect == "RR" && !is.null(exposure))
+  use_direct_rr    <- (effect == "RR" && is.null(exposure))
+
+  if (effect == "OR") {
+    if (!identical(family$family, "binomial") || !identical(family$link, "logit")) {
+      stop("boot.glm(): effect = \"OR\" (odds ratio) requires family = ",
+           "binomial(link = \"logit\"); got family = \"", family$family,
+           "\", link = \"", family$link, "\".")
+    }
+  }
+  if (use_direct_rr) {
+    if (!identical(family$link, "log")) {
+      stop("boot.glm(): effect = \"RR\" without 'exposure' (conditional ",
+           "risk ratio, one per predictor) requires a log link, e.g. ",
+           "family = binomial(link = \"log\") or poisson(link = \"log\"); ",
+           "got link = \"", family$link, "\". Specify 'exposure' instead ",
+           "for the marginal risk ratio via g-computation, which works ",
+           "with any link (family = binomial()).")
+    }
+  }
+  if (use_gcomp_rr_rd) {
     if (!identical(family$family, "binomial")) {
       stop("boot.glm(): effect = \"", effect, "\" (marginal risk ratio/",
            "difference by g-computation) is only available for family = ",
@@ -151,6 +223,11 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
       stop("boot.glm(): effect = \"", effect, "\" requires 'exposure' to ",
            "be the (single) name of a binary predictor in 'formula'.")
     }
+  }
+  if (effect == "PAF" && !identical(family$family, "binomial")) {
+    stop("boot.glm(): effect = \"PAF\" (population attributable fraction) ",
+         "is only available for family = binomial(); got family = \"",
+         family$family, "\".")
   }
 
   ## fit via the *original* call, verbatim, so subset/weights/na.action/
@@ -176,36 +253,40 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
   ww <- if (is.null(w)) rep(1, n) else w
   oo <- if (is.null(off)) rep(0, n) else off
 
-  if (effect == "coef") {
+  if (effect %in% c("coef", "OR") || use_direct_rr) {
+    ## "coef", "OR", and the direct (no-exposure) form of "RR" all bootstrap
+    ## the exact same coefficient replicates; only the final reporting scale
+    ## (raw vs. exponentiated) differs, and the p-value is always computed
+    ## on the coefficient scale.
     boot_coef <- .boot_glm_coef(X, yy, R, family, weights = ww, offset = oo,
                                  start = beta_hat, irls.maxit = irls.maxit,
                                  irls.tol = irls.tol)
     loo_coef <- .jack_glm_coef(X, yy, fit)
+    tbl <- .coef_bca_table(boot_coef, loo_coef, beta_hat, conf.level)
 
-    ci <- matrix(NA_real_, nrow = p, ncol = 2,
-                 dimnames = list(names(beta_hat), c("lower", "upper")))
-    pval <- setNames(numeric(p), names(beta_hat))
-    for (j in seq_len(p)) {
-      ok <- stats::complete.cases(boot_coef[, j])
-      tb <- boot_coef[ok, j]
-      if (length(tb) < 10) {
-        ci[j, ] <- c(NA, NA); pval[j] <- NA
-        next
-      }
-      out <- .bca_ci(tb, beta_hat[j], loo_coef[, j], conf.level)
-      ci[j, ] <- as.numeric(out)
-      pval[j] <- .bca_pvalue(0, tb, beta_hat[j], attr(out, "a"), "two.sided")
+    if (effect == "coef") {
+      fit$boot <- list(
+        effect       = "coef",
+        coefficients = boot_coef,
+        conf.int     = tbl$conf.int,
+        p.value      = tbl$p.value,
+        conf.level   = conf.level,
+        R            = R
+      )
+    } else {
+      fit$boot <- list(
+        effect       = effect,
+        method       = "direct",
+        coefficients = boot_coef,
+        estimate     = exp(beta_hat),
+        conf.int     = exp(tbl$conf.int),
+        p.value      = tbl$p.value,
+        conf.level   = conf.level,
+        R            = R
+      )
     }
-
-    fit$boot <- list(
-      effect       = "coef",
-      coefficients = boot_coef,
-      conf.int     = ci,
-      p.value      = pval,
-      conf.level   = conf.level,
-      R            = R
-    )
-  } else {
+  } else if (use_gcomp_rr_rd) {
+    gc_effect <- if (effect == "RR") "rr" else "rd"
     nm_all <- colnames(X)
     term.labels <- attr(mt, "term.labels")
     term_idx <- match(exposure, term.labels)
@@ -238,14 +319,14 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
     p1_hat <- family$linkinv(as.vector(X1 %*% beta_hat) + oo)
     p0_hat <- family$linkinv(as.vector(X0 %*% beta_hat) + oo)
     R1_hat <- mean(p1_hat); R0_hat <- mean(p0_hat)
-    theta_hat <- if (effect == "rr") R1_hat / R0_hat else R1_hat - R0_hat
+    theta_hat <- if (gc_effect == "rr") R1_hat / R0_hat else R1_hat - R0_hat
 
     boot_stat <- .boot_glm_gcomp(X, yy, R, family, weights = ww, offset = oo,
                                   start = beta_hat, irls.maxit = irls.maxit,
                                   irls.tol = irls.tol, expo_col = expo_col,
-                                  effect = effect)
+                                  effect = gc_effect)
     loo_beta <- .jack_glm_coef(X, yy, fit)
-    loo_stat <- .jack_glm_gcomp(X, loo_beta, expo_col, family$linkinv, effect,
+    loo_stat <- .jack_glm_gcomp(X, loo_beta, expo_col, family$linkinv, gc_effect,
                                  offset = oo)
 
     ok <- stats::complete.cases(boot_stat)
@@ -256,7 +337,7 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
     } else {
       out <- .bca_ci(tb, theta_hat, loo_stat, conf.level)
       ci <- as.numeric(out)
-      null_val <- if (effect == "rr") 1 else 0
+      null_val <- if (gc_effect == "rr") 1 else 0
       pval_val <- .bca_pvalue(null_val, tb, theta_hat, attr(out, "a"), "two.sided")
     }
     nm <- exposure
@@ -266,8 +347,62 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
 
     fit$boot <- list(
       effect       = effect,
+      method       = "gcomputation",
       exposure     = exposure,
       coefficients = matrix(boot_stat, ncol = 1L, dimnames = list(NULL, nm)),
+      estimate     = est,
+      conf.int     = ci,
+      p.value      = pval,
+      conf.level   = conf.level,
+      R            = R
+    )
+  } else {
+    ## effect == "PAF"
+    recipes <- .paf_recipes(mt, data, X)
+    nm <- vapply(recipes, function(r) r$name, character(1))
+    k <- length(recipes)
+
+    p_true_hat <- mean(yy)
+    if (!(p_true_hat > 0)) {
+      stop("boot.glm(): effect = \"PAF\" requires at least one observed ",
+           "event (mean(y) > 0).")
+    }
+    est <- setNames(numeric(k), nm)
+    for (kk in seq_len(k)) {
+      rec <- recipes[[kk]]
+      Xcf <- X
+      if (rec$type == "categorical") Xcf[, rec$cols] <- 0
+      else Xcf[, rec$cols] <- mean(X[, rec$cols])
+      p_cf_hat <- mean(family$linkinv(as.vector(Xcf %*% beta_hat) + oo))
+      est[kk] <- (p_true_hat - p_cf_hat) / p_true_hat
+    }
+
+    boot_stat <- .boot_glm_paf(X, yy, R, family, weights = ww, offset = oo,
+                                start = beta_hat, irls.maxit = irls.maxit,
+                                irls.tol = irls.tol, recipes = recipes)
+
+    loo_beta <- .jack_glm_coef(X, yy, fit)
+    loo_cf <- .jack_glm_cf_prevalence(X, loo_beta, family$linkinv, recipes,
+                                       offset = oo)
+    Sy <- sum(yy)
+    p_true_loo <- (Sy - yy) / (n - 1)          # closed-form LOO prevalence
+    loo_stat <- (p_true_loo - loo_cf) / p_true_loo   # n x k, row-recycled
+
+    ci <- matrix(NA_real_, nrow = k, ncol = 2, dimnames = list(nm, c("lower", "upper")))
+    pval <- setNames(numeric(k), nm)
+    for (kk in seq_len(k)) {
+      ok <- stats::complete.cases(boot_stat[, kk])
+      tb <- boot_stat[ok, kk]
+      if (length(tb) < 10) { ci[kk, ] <- c(NA, NA); pval[kk] <- NA; next }
+      out <- .bca_ci(tb, est[kk], loo_stat[, kk], conf.level)
+      ci[kk, ] <- as.numeric(out)
+      pval[kk] <- .bca_pvalue(0, tb, est[kk], attr(out, "a"), "two.sided")
+    }
+
+    fit$boot <- list(
+      effect       = "PAF",
+      method       = "gcomputation",
+      coefficients = boot_stat,
       estimate     = est,
       conf.int     = ci,
       p.value      = pval,
@@ -309,6 +444,7 @@ summary.boot.glm <- function(object, ...) {
   s$conf.level <- b$conf.level
   s$R <- b$R
   s$effect <- effect
+  s$method <- b$method
   s$exposure <- b$exposure
   class(s) <- c("summary.boot.glm", class(s))
   s
@@ -321,8 +457,13 @@ print.summary.boot.glm <- function(x, digits = max(3L, getOption("digits") - 3L)
   print(x$call)
   eff_label <- switch(x$effect,
     coef = "Coefficients",
-    rr   = sprintf("Marginal risk ratio (exposure: '%s', g-computation)", x$exposure),
-    rd   = sprintf("Marginal risk difference (exposure: '%s', g-computation)", x$exposure),
+    OR   = "Odds ratios (exponentiated coefficients)",
+    RR   = if (identical(x$method, "gcomputation"))
+             sprintf("Marginal risk ratio (exposure: '%s', g-computation)", x$exposure)
+           else
+             "Conditional risk ratios (exponentiated coefficients)",
+    RD   = sprintf("Marginal risk difference (exposure: '%s', g-computation)", x$exposure),
+    PAF  = "Population attributable fraction (g-computation)",
     "Coefficients"
   )
   cat(sprintf(

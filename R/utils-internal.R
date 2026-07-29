@@ -262,6 +262,121 @@
   sweep(-delta, 2, beta_hat, "+")
 }
 
+#' Assemble BCa confidence intervals and CI-inversion p-values for a whole
+#' matrix of bootstrap / leave-one-out coefficient replicates in one
+#' pass, on the natural (unt transformed) coefficient scale. Shared by
+#' boot.lm()'s and boot.glm()'s "coef" branch, and by boot.glm()'s "OR"
+#' and direct ("no exposure", log-link) "RR" branches, which reuse the
+#' exact same bootstrap/jackknife coefficient replicates and simply
+#' exponentiate the resulting estimate/CI afterwards (the p-value is left
+#' untouched, since exponentiation is monotonic and does not change which
+#' side of the null a replicate falls on).
+#'
+#' @param boot_mat (R x p) matrix of bootstrap replicate coefficients
+#'   (failed replicates should be NA rows)
+#' @param loo_mat (n x p) matrix of leave-one-out coefficients
+#' @param beta_hat named numeric vector, the full-data estimate
+#' @keywords internal
+#' @noRd
+.coef_bca_table <- function(boot_mat, loo_mat, beta_hat, conf.level = 0.95) {
+  p  <- length(beta_hat)
+  nm <- names(beta_hat)
+  ci   <- matrix(NA_real_, nrow = p, ncol = 2, dimnames = list(nm, c("lower", "upper")))
+  pval <- stats::setNames(rep(NA_real_, p), nm)
+  for (j in seq_len(p)) {
+    ok <- stats::complete.cases(boot_mat[, j])
+    tb <- boot_mat[ok, j]
+    if (length(tb) < 10) next
+    out <- .bca_ci(tb, beta_hat[j], loo_mat[, j], conf.level)
+    ci[j, ] <- as.numeric(out)
+    pval[j] <- .bca_pvalue(0, tb, beta_hat[j], attr(out, "a"), "two.sided")
+  }
+  list(conf.int = ci, p.value = pval)
+}
+
+#' Fast case-resampling bootstrap of the "predicted R" statistic used by
+#' boot.lm()'s \code{pred.r.squared} option: for each replicate,
+#' resample rows, refit OLS via the same Cholesky solve used elsewhere
+#' (\code{.boot_lm_coef}), then -- reusing the exact leave-one-out
+#' identity already used for the BCa acceleration constant
+#' (\code{.jack_lm_coef}), but now applied *within* this one replicate's
+#' own resampled data -- get every resampled observation's leave-one-out
+#' predicted value, and return the (signed) Pearson correlation between
+#' the resampled response and those leave-one-out predictions. This is
+#' the quantity whose square is reported as "predicted R-squared".
+#'
+#' @return length-R numeric vector (NA for replicates whose refit failed
+#'   or were otherwise degenerate)
+#' @keywords internal
+#' @noRd
+.boot_lm_predR <- function(X, y, R) {
+  n <- nrow(X); p <- ncol(X)
+  df_resid <- n - p
+  idx <- .boot_idx(n, R)
+  out <- rep(NA_real_, R)
+  if (df_resid <= 1L) return(out)
+
+  for (b in seq_len(R)) {
+    rows <- idx[, b]
+    Xb <- X[rows, , drop = FALSE]
+    yb <- y[rows]
+    XtX <- crossprod(Xb)
+    ch <- tryCatch(chol(XtX), error = function(e) NULL)
+    if (is.null(ch)) next
+    Xty <- crossprod(Xb, yb)
+    beta_b <- backsolve(ch, backsolve(ch, Xty, transpose = TRUE))
+    XtX_inv_b <- tryCatch(chol2inv(ch), error = function(e) NULL)
+    if (is.null(XtX_inv_b)) next
+
+    fitted_b <- as.vector(Xb %*% beta_b)
+    e_b <- yb - fitted_b
+    h_b <- rowSums((Xb %*% XtX_inv_b) * Xb)
+    h_b <- pmin(h_b, 1 - 1e-10)
+    V_b <- Xb %*% XtX_inv_b
+    delta_b <- (e_b / (1 - h_b)) * V_b
+    beta_loo_b <- sweep(-delta_b, 2, beta_b, "+")     # n x p, within-replicate LOO coefs
+    pred_loo_b <- rowSums(Xb * beta_loo_b)            # n, within-replicate LOO predictions
+
+    if (stats::sd(pred_loo_b) <= 0 || stats::sd(yb) <= 0) next
+    out[b] <- stats::cor(yb, pred_loo_b)
+  }
+  out
+}
+
+#' Closed-form "delete-one-pair" leave-one-out correlation between two
+#' vectors, used only for the BCa acceleration constant of
+#' \code{pred.r.squared}: rather than a full nested double-jackknife (for
+#' each held-out observation, refitting *and* recomputing every other
+#' observation's own leave-one-out prediction on the reduced (n-1)-point
+#' sample -- an O(n^2)-ish computation), this reuses the already-computed
+#' full-sample leave-one-out predictions and simply excludes one
+#' (response, prediction) pair at a time from the correlation formula,
+#' via the standard incremental sum-of-squares/sum-of-products identity.
+#' This is an approximation of the true nested jackknife (it does not
+#' re-derive each remaining point's leave-one-out prediction under the
+#' (n-1)-point sample), consistent with the fast, one-step/closed-form
+#' jackknife approximations already used elsewhere in this package, and
+#' keeps the whole computation O(n) instead of O(n^2).
+#'
+#' @param u,v numeric vectors of the same length (response, leave-one-out
+#'   predictions)
+#' @return length-n numeric vector of leave-one-out correlations
+#' @keywords internal
+#' @noRd
+.loo_cor_exclude_pairs <- function(u, v) {
+  n <- length(u)
+  m <- n - 1
+  Su <- sum(u); Sv <- sum(v)
+  Suu <- sum(u^2); Svv <- sum(v^2); Suv <- sum(u * v)
+  Su_i <- Su - u;   Sv_i <- Sv - v
+  Suu_i <- Suu - u^2; Svv_i <- Svv - v^2; Suv_i <- Suv - u * v
+  cov_i  <- Suv_i - Su_i * Sv_i / m
+  varu_i <- Suu_i - Su_i^2 / m
+  varv_i <- Svv_i - Sv_i^2 / m
+  denom <- sqrt(varu_i * varv_i)
+  ifelse(denom > 0, cov_i / denom, NA_real_)
+}
+
 #' Given a BCa confidence interval computed on a *signed* statistic (one
 #' that can be negative -- a partial or semi-partial correlation), derive
 #' the confidence interval for its *square* (partial eta-squared /
@@ -535,6 +650,192 @@
     R0[s:e] <- colMeans(linkinv(Eta0))
   }
   if (effect == "rr") ifelse(R0 <= 0, NA_real_, R1 / R0) else R1 - R0
+}
+
+#' Identify the simple, untransformed, non-interaction predictor terms
+#' eligible for population attributable fraction (PAF) reporting, and
+#' classify each as "categorical" (factor/character/logical -- the
+#' reference/counterfactual value is "everyone at the reference level",
+#' i.e. all of that term's design-matrix dummy columns set to 0 under the
+#' usual treatment contrasts) or "continuous" (numeric -- the
+#' counterfactual value is "everyone at the sample mean").
+#'
+#' Interaction terms and terms that don't match a raw column name in
+#' \code{data} (e.g. \code{poly(x, 2)}, \code{log(x)}) are not supported
+#' -- the "set to reference/mean for everyone" counterfactual has no
+#' unambiguous meaning for a transformed or interaction term -- so this
+#' errors out (rather than silently skipping them) if any are found,
+#' listing the offending term(s).
+#'
+#' @param mt the model \code{terms} object
+#' @param data the original (raw, untransformed) data actually used by the
+#'   fit
+#' @param X the fitted model matrix (for its \code{"assign"} attribute)
+#' @return a list; each element is \code{list(name, type, cols)} where
+#'   \code{cols} are the design-matrix column indices for that term
+#' @keywords internal
+#' @noRd
+.paf_recipes <- function(mt, data, X) {
+  term.labels <- attr(mt, "term.labels")
+  if (length(term.labels) == 0L) {
+    stop("boot.glm(): effect = \"PAF\" requires at least one predictor term.",
+         call. = FALSE)
+  }
+  assign_vec <- attr(X, "assign")
+  bad <- character(0)
+  recipes <- list()
+  for (i in seq_along(term.labels)) {
+    term <- term.labels[i]
+    if (grepl(":", term, fixed = TRUE) || !term %in% names(data)) {
+      bad <- c(bad, term)
+      next
+    }
+    cols <- which(assign_vec == i)
+    if (length(cols) == 0L) {
+      bad <- c(bad, term)
+      next
+    }
+    v <- data[[term]]
+    type <- if (is.factor(v) || is.character(v) || is.logical(v)) "categorical" else "continuous"
+    recipes[[length(recipes) + 1L]] <- list(name = term, type = type, cols = cols)
+  }
+  if (length(bad) > 0L) {
+    stop("boot.glm(): effect = \"PAF\" only supports simple, untransformed, ",
+         "non-interaction predictor terms (each term must match a raw ",
+         "column name in 'data', with no interactions or transformations ",
+         "such as poly()/log()); please refit without: ",
+         paste(bad, collapse = ", "), ".", call. = FALSE)
+  }
+  recipes
+}
+
+#' Fast case-resampling bootstrap of the population attributable fraction
+#' (PAF) for every eligible predictor term at once, via g-computation:
+#' each replicate resamples whole rows (outcome and covariates together),
+#' refits the binomial GLM with the same lean IRLS solver used elsewhere
+#' (\code{\link{.boot_glm_coef}}), computes that replicate's own observed
+#' ("true") prevalence \code{mean(yb)}, and then -- still within that
+#' same replicate's resampled covariate distribution and refit
+#' coefficients -- predicts the counterfactual prevalence for every
+#' recipe (categorical terms: all dummy columns set to 0; continuous
+#' terms: set to that replicate's own resampled column mean). The PAF for
+#' each term is \code{(true - counterfactual) / true}. Resampling the
+#' standardization population together with the outcome model on every
+#' replicate is the same "cases bootstrap" already used for
+#' \code{.boot_glm_gcomp}'s risk ratio/difference.
+#'
+#' @param recipes list from \code{.paf_recipes}
+#' @return (R x k) matrix, k = length(recipes); NA row for replicates
+#'   whose refit failed or whose resampled prevalence was 0
+#' @keywords internal
+#' @noRd
+.boot_glm_paf <- function(X, y, R, family, weights, offset, start,
+                           irls.maxit, irls.tol, recipes) {
+  n <- nrow(X); k <- length(recipes)
+  idx <- .boot_idx(n, R)
+  out <- matrix(NA_real_, nrow = R, ncol = k)
+
+  w_all <- weights
+  o_all <- offset
+  beta0 <- as.numeric(start)
+  variance <- family$variance
+  linkinv  <- family$linkinv
+  mu.eta   <- family$mu.eta
+
+  for (b in seq_len(R)) {
+    rows <- idx[, b]
+    Xb <- X[rows, , drop = FALSE]
+    yb <- y[rows]
+    wb <- w_all[rows]
+    ob <- o_all[rows]
+
+    beta_b <- tryCatch({
+      beta <- beta0
+      eta <- as.vector(Xb %*% beta) + ob
+      for (it in seq_len(irls.maxit)) {
+        mu <- linkinv(eta)
+        mu.eta.val <- mu.eta(eta)
+        mu.eta.val[mu.eta.val == 0] <- .Machine$double.eps
+        z <- (eta - ob) + (yb - mu) / mu.eta.val
+        W <- (mu.eta.val^2 / variance(mu)) * wb
+        XW <- Xb * W
+        ch <- chol(crossprod(Xb, XW))
+        beta_new <- backsolve(ch, backsolve(ch, crossprod(XW, z), transpose = TRUE))
+        if (max(abs(beta_new - beta)) < irls.tol * (max(abs(beta)) + irls.tol)) {
+          beta <- beta_new
+          break
+        }
+        beta <- beta_new
+        eta <- as.vector(Xb %*% beta) + ob
+        if (!all(is.finite(eta))) stop("non-finite linear predictor")
+      }
+      beta
+    }, error = function(e) NULL)
+
+    if (is.null(beta_b)) next
+
+    p_true_b <- mean(yb)
+    if (!(p_true_b > 0)) next
+
+    for (kk in seq_len(k)) {
+      rec <- recipes[[kk]]
+      Xcf <- Xb
+      if (rec$type == "categorical") {
+        Xcf[, rec$cols] <- 0
+      } else {
+        Xcf[, rec$cols] <- mean(Xb[, rec$cols])
+      }
+      p_cf <- mean(linkinv(as.vector(Xcf %*% beta_b) + ob))
+      out[b, kk] <- (p_true_b - p_cf) / p_true_b
+    }
+  }
+  out
+}
+
+#' Closed-form (no-refit) leave-one-out *counterfactual prevalence* for
+#' every PAF recipe, used only for the BCa acceleration constant. Reuses
+#' the one-step Newton leave-one-out betas already computed by
+#' \code{.jack_glm_coef} (see \code{.jack_glm_gcomp} for the same
+#' technique applied to a single exposure). For continuous recipes the
+#' reference value is fixed at the *full-data* column mean rather than a
+#' recomputed leave-one-out mean -- a small approximation, consistent
+#' with this jackknife already being a fast one-step approximation rather
+#' than an exact refit, that keeps the computation fully vectorized
+#' (chunked matrix products) instead of needing a different reference
+#' value for every one of the n pseudo-replicates.
+#'
+#' Combining this with the (separately computed, closed-form) leave-one-
+#' out *observed* prevalence gives the leave-one-out PAF used for the BCa
+#' acceleration constant; see boot_glm.R.
+#'
+#' @param recipes list from \code{.paf_recipes}
+#' @return (n x k) matrix of leave-one-out counterfactual prevalences
+#' @keywords internal
+#' @noRd
+.jack_glm_cf_prevalence <- function(X, beta_loo, linkinv, recipes, offset = NULL) {
+  n <- nrow(X); k <- length(recipes)
+  off <- if (is.null(offset)) rep(0, n) else offset
+  out <- matrix(NA_real_, nrow = n, ncol = k)
+  chunk <- if (n > 2000L) 500L else n
+  starts <- seq(1L, n, by = chunk)
+  for (kk in seq_len(k)) {
+    rec <- recipes[[kk]]
+    Xcf <- X
+    if (rec$type == "categorical") {
+      Xcf[, rec$cols] <- 0
+    } else {
+      Xcf[, rec$cols] <- mean(X[, rec$cols])
+    }
+    p_cf <- numeric(n)
+    for (s in starts) {
+      e <- min(s + chunk - 1L, n)
+      Bt  <- t(beta_loo[s:e, , drop = FALSE])
+      Eta <- Xcf %*% Bt + off
+      p_cf[s:e] <- colMeans(linkinv(Eta))
+    }
+    out[, kk] <- p_cf
+  }
+  out
 }
 
 #' Fast case-resampling bootstrap for GLM coefficients using a lean,

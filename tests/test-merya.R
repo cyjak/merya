@@ -143,6 +143,39 @@ stopifnot(isTRUE(all.equal(fit_default_a$boot$conf.int, fit_default_b$boot$conf.
 
 cat("boot.lm effect-size tests passed.\n")
 
+## ---- boot.lm: pred.r.squared ---------------------------------------------
+fit_predR_off <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300)
+stopifnot(is.null(fit_predR_off$boot$pred.r.squared))  # off by default
+
+fit_predR <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 500,
+                             pred.r.squared = TRUE)
+pr <- fit_predR$boot$pred.r.squared
+stopifnot(!is.null(pr))
+stopifnot(pr$estimate >= 0)  # it's a square, must be non-negative
+stopifnot(all(pr$conf.int >= 0, na.rm = TRUE))
+stopifnot(pr$conf.int[1, "lower"] <= pr$conf.int[1, "upper"])
+stopifnot(is.finite(pr$p.value), pr$p.value >= 0, pr$p.value <= 1)
+## should coexist with any effect= choice
+fit_predR_eta2 <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 500,
+                                  effect = "eta2", pred.r.squared = TRUE)
+stopifnot(!is.null(fit_predR_eta2$boot$pred.r.squared))
+stopifnot(identical(fit_predR_eta2$boot$effect, "eta2"))
+## predicted R-squared should not exceed ordinary (in-sample) R-squared
+stopifnot(pr$estimate <= summary.lm(fit_predR)$r.squared + 1e-8)
+## summary() should print without erroring and expose it
+s_predR <- summary(fit_predR)
+stopifnot(!is.null(s_predR$pred.r.squared))
+
+## default seed reproducibility for pred.r.squared
+fit_predR_r1 <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300,
+                                pred.r.squared = TRUE)
+fit_predR_r2 <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300,
+                                pred.r.squared = TRUE)
+stopifnot(isTRUE(all.equal(fit_predR_r1$boot$pred.r.squared$conf.int,
+                            fit_predR_r2$boot$pred.r.squared$conf.int)))
+
+cat("boot.lm pred.r.squared tests passed.\n")
+
 ## ---- boot.glm ----------------------------------------------------------
 gfit <- merya::boot.glm(am ~ wt + hp, data = mtcars, family = binomial(), R = 300)
 stopifnot(inherits(gfit, "glm"))
@@ -161,41 +194,143 @@ gfit_r1 <- merya::boot.glm(am ~ wt + hp, data = mtcars, family = binomial(), R =
 gfit_r2 <- merya::boot.glm(am ~ wt + hp, data = mtcars, family = binomial(), R = 300)
 stopifnot(isTRUE(all.equal(gfit_r1$boot$conf.int, gfit_r2$boot$conf.int)))
 
-## ---- boot.glm: effect = "rr" / "rd" (g-computation) ---------------------
+## ---- boot.glm: effect = "OR" ---------------------------------------------
+or_fit <- merya::boot.glm(am ~ wt + hp, data = mtcars,
+                           family = binomial(link = "logit"), R = 500, effect = "OR")
+stopifnot(identical(or_fit$boot$effect, "OR"))
+stopifnot(identical(or_fit$boot$method, "direct"))
+stopifnot(all(or_fit$boot$conf.int > 0, na.rm = TRUE))  # ORs are non-negative
+## OR must be exp(coef) and its CI exp(coef CI); p-value must be identical
+## to plain "coef" mode (same underlying bootstrap/jackknife replicates)
+coef_fit <- merya::boot.glm(am ~ wt + hp, data = mtcars,
+                             family = binomial(link = "logit"), R = 500)
+stopifnot(isTRUE(all.equal(unname(exp(stats::coef(coef_fit))),
+                            unname(or_fit$boot$estimate[names(stats::coef(coef_fit))]))))
+stopifnot(isTRUE(all.equal(exp(coef_fit$boot$conf.int), or_fit$boot$conf.int,
+                            check.attributes = FALSE)))
+stopifnot(isTRUE(all.equal(coef_fit$boot$p.value, or_fit$boot$p.value,
+                            check.attributes = FALSE)))
+ors <- summary(or_fit)
+stopifnot(identical(ors$effect, "OR"))
+stopifnot(!("Boot SE" %in% colnames(ors$coefficients)))
+
+## OR requires family = binomial(link = "logit")
+stopifnot(inherits(
+  tryCatch(merya::boot.glm(am ~ wt, data = mtcars, family = binomial(link = "probit"),
+                            effect = "OR", R = 50),
+           error = function(e) e),
+  "error"))
+stopifnot(inherits(
+  tryCatch(merya::boot.glm(mpg ~ wt, data = mtcars, family = gaussian(),
+                            effect = "OR", R = 50),
+           error = function(e) e),
+  "error"))
+
+cat("boot.glm OR tests passed.\n")
+
+## ---- boot.glm: effect = "RR" (conditional, direct exp(coef)) ------------
+rr_direct <- merya::boot.glm(am ~ wt + hp, data = mtcars,
+                              family = binomial(link = "log"), R = 500, effect = "RR")
+stopifnot(identical(rr_direct$boot$effect, "RR"))
+stopifnot(identical(rr_direct$boot$method, "direct"))
+stopifnot(all(rr_direct$boot$conf.int > 0, na.rm = TRUE))
+## must match exp(coef) from the same log-link model fit with effect="coef"
+coef_log_fit <- merya::boot.glm(am ~ wt + hp, data = mtcars,
+                                 family = binomial(link = "log"), R = 500)
+stopifnot(isTRUE(all.equal(exp(coef_log_fit$boot$conf.int), rr_direct$boot$conf.int,
+                            check.attributes = FALSE)))
+stopifnot(isTRUE(all.equal(coef_log_fit$boot$p.value, rr_direct$boot$p.value,
+                            check.attributes = FALSE)))
+
+## conditional RR (no exposure) requires a log link, but works for ANY family
+rr_poisson <- merya::boot.glm(carb ~ wt, data = mtcars,
+                               family = poisson(link = "log"), R = 300, effect = "RR")
+stopifnot(identical(rr_poisson$boot$effect, "RR"))
+stopifnot(identical(rr_poisson$boot$method, "direct"))
+
+## conditional RR without 'exposure' must be rejected for a non-log link
+stopifnot(inherits(
+  tryCatch(merya::boot.glm(am ~ wt, data = mtcars, family = binomial(link = "logit"),
+                            effect = "RR", R = 50),
+           error = function(e) e),
+  "error"))
+
+cat("boot.glm RR (direct) tests passed.\n")
+
+## ---- boot.glm: effect = "RR" / "RD" (marginal, g-computation) -----------
 d_rr <- mtcars
 d_rr$vs <- factor(d_rr$vs)
 rr_fit <- merya::boot.glm(am ~ vs + wt, data = d_rr, family = binomial(),
-                           R = 500, effect = "rr", exposure = "vs")
+                           R = 500, effect = "RR", exposure = "vs")
 stopifnot(inherits(rr_fit, "boot.glm"))
-stopifnot(identical(rr_fit$boot$effect, "rr"))
+stopifnot(identical(rr_fit$boot$effect, "RR"))
+stopifnot(identical(rr_fit$boot$method, "gcomputation"))
 stopifnot(identical(rr_fit$boot$exposure, "vs"))
 stopifnot(rr_fit$boot$estimate > 0)  # risk ratio is non-negative
 stopifnot(rr_fit$boot$conf.int[1, "lower"] <= rr_fit$boot$conf.int[1, "upper"])
 rrs <- summary(rr_fit)
-stopifnot(identical(rrs$effect, "rr"))
+stopifnot(identical(rrs$effect, "RR"))
 stopifnot("vs" %in% rownames(rrs$coefficients))
 stopifnot(!("Boot SE" %in% colnames(rrs$coefficients)))
 
+## RR with 'exposure' given must run g-computation even under a log link
+## (per spec: exposure given -> always marginal RR via g-computation)
+rr_fit_log <- merya::boot.glm(am ~ vs + wt, data = d_rr, family = binomial(link = "log"),
+                               R = 300, effect = "RR", exposure = "vs")
+stopifnot(identical(rr_fit_log$boot$method, "gcomputation"))
+
 rd_fit <- merya::boot.glm(am ~ vs + wt, data = d_rr, family = binomial(),
-                           R = 500, effect = "rd", exposure = "vs")
-stopifnot(identical(rd_fit$boot$effect, "rd"))
+                           R = 500, effect = "RD", exposure = "vs")
+stopifnot(identical(rd_fit$boot$effect, "RD"))
+stopifnot(identical(rd_fit$boot$method, "gcomputation"))
 stopifnot(rd_fit$boot$estimate >= -1 && rd_fit$boot$estimate <= 1)
 stopifnot(rd_fit$boot$conf.int[1, "lower"] <= rd_fit$boot$conf.int[1, "upper"])
 
-## effect = "rr"/"rd" must be rejected for non-binomial families
+## marginal RR/RD (exposure given) must be rejected for non-binomial families
 stopifnot(inherits(
   tryCatch(merya::boot.glm(mpg ~ wt, data = mtcars, family = gaussian(),
-                            effect = "rr", exposure = "wt", R = 50),
+                            effect = "RR", exposure = "wt", R = 50),
            error = function(e) e),
   "error"))
-## effect = "rr" without 'exposure' must error clearly
 stopifnot(inherits(
   tryCatch(merya::boot.glm(am ~ vs + wt, data = d_rr, family = binomial(),
-                            effect = "rr", R = 50),
+                            effect = "RD", R = 50),
            error = function(e) e),
   "error"))
 
-cat("boot.glm g-computation tests passed.\n")
+cat("boot.glm RR/RD (g-computation) tests passed.\n")
+
+## ---- boot.glm: effect = "PAF" --------------------------------------------
+paf_fit <- merya::boot.glm(am ~ vs + wt, data = d_rr, family = binomial(),
+                            R = 500, effect = "PAF")
+stopifnot(identical(paf_fit$boot$effect, "PAF"))
+stopifnot(identical(paf_fit$boot$method, "gcomputation"))
+## one row per eligible term: "vs" (categorical) and "wt" (continuous)
+stopifnot(setequal(rownames(paf_fit$boot$conf.int), c("vs", "wt")))
+pafs <- summary(paf_fit)
+stopifnot(identical(pafs$effect, "PAF"))
+stopifnot(!("Boot SE" %in% colnames(pafs$coefficients)))
+
+## PAF requires family = binomial()
+stopifnot(inherits(
+  tryCatch(merya::boot.glm(mpg ~ wt, data = mtcars, family = gaussian(),
+                            effect = "PAF", R = 50),
+           error = function(e) e),
+  "error"))
+
+## PAF must reject interaction / transformed terms
+stopifnot(inherits(
+  tryCatch(merya::boot.glm(am ~ vs * wt, data = d_rr, family = binomial(),
+                            effect = "PAF", R = 50),
+           error = function(e) e),
+  "error"))
+stopifnot(inherits(
+  tryCatch(merya::boot.glm(am ~ vs + log(wt), data = d_rr, family = binomial(),
+                            effect = "PAF", R = 50),
+           error = function(e) e),
+  "error"))
+
+cat("boot.glm PAF tests passed.\n")
 
 cat("All merya smoke tests passed.\n")
 

@@ -232,34 +232,6 @@ stopifnot(inherits(
 
 cat("boot.glm OR tests passed.\n")
 
-## ---- print() must reflect the requested effect, not raw coefficients ----
-## Regression test: without a print.boot.glm() method, print(fit)/auto-print
-## falls through to the inherited print.glm(), which always shows the RAW
-## (possibly negative) coefficients regardless of 'effect' -- e.g. a
-## legitimately negative log-odds slope could look like a "negative odds
-## ratio" to a user who only ever typed the fitted object at the console.
-printed_or <- capture.output(print(or_fit))
-stopifnot(any(grepl("Odds ratio", printed_or)))
-stopifnot(!any(grepl("Coefficients \\(BCa", printed_or)))
-## the printed Estimate values must match the exponentiated (positive)
-## ones, not the raw (possibly negative) coefficient scale
-stopifnot(all(or_fit$boot$estimate >= 0))
-
-printed_rr <- capture.output(print(rr_fit))
-stopifnot(any(grepl("Marginal risk ratio", printed_rr)))
-
-printed_lm_pcor <- capture.output(print(fit_pcor))
-stopifnot(any(grepl("Partial correlations", printed_lm_pcor)))
-
-## plain effect = "coef" objects must still auto-print via summary(), too
-## (not the base print.lm()/print.glm(), for a consistent interface)
-printed_coef_glm <- capture.output(print(gfit))
-stopifnot(any(grepl("Coefficients \\(BCa", printed_coef_glm)))
-printed_coef_lm <- capture.output(print(fit))
-stopifnot(any(grepl("Coefficients \\(BCa", printed_coef_lm)))
-
-cat("print.boot.lm / print.boot.glm regression tests passed.\n")
-
 ## ---- boot.glm: effect = "RR" (conditional, direct exp(coef)) ------------
 rr_direct <- merya::boot.glm(am ~ wt + hp, data = mtcars,
                               family = binomial(link = "log"), R = 500, effect = "RR")
@@ -333,6 +305,35 @@ stopifnot(inherits(
   "error"))
 
 cat("boot.glm RR/RD (g-computation) tests passed.\n")
+
+## ---- print() must reflect the requested effect, not raw coefficients ----
+## Regression test: without a print.boot.glm() method, print(fit)/auto-print
+## falls through to the inherited print.glm(), which always shows the RAW
+## (possibly negative) coefficients regardless of 'effect' -- e.g. a
+## legitimately negative log-odds slope could look like a "negative odds
+## ratio" to a user who only ever typed the fitted object at the console.
+## (Needs or_fit, rr_fit, fit_pcor, gfit, fit -- all defined by this point.)
+printed_or <- capture.output(print(or_fit))
+stopifnot(any(grepl("Odds ratio", printed_or)))
+stopifnot(!any(grepl("Coefficients \\(BCa", printed_or)))
+## the printed Estimate values must match the exponentiated (non-negative)
+## ones, not the raw (possibly negative) coefficient scale
+stopifnot(all(or_fit$boot$estimate >= 0))
+
+printed_rr <- capture.output(print(rr_fit))
+stopifnot(any(grepl("Marginal risk ratio", printed_rr)))
+
+printed_lm_pcor <- capture.output(print(fit_pcor))
+stopifnot(any(grepl("Partial correlations", printed_lm_pcor)))
+
+## plain effect = "coef" objects must still auto-print via summary(), too
+## (not the base print.lm()/print.glm(), for a consistent interface)
+printed_coef_glm <- capture.output(print(gfit))
+stopifnot(any(grepl("Coefficients \\(BCa", printed_coef_glm)))
+printed_coef_lm <- capture.output(print(fit))
+stopifnot(any(grepl("Coefficients \\(BCa", printed_coef_lm)))
+
+cat("print.boot.lm / print.boot.glm regression tests passed.\n")
 
 ## ---- boot.glm: effect = "PAF" --------------------------------------------
 paf_fit <- merya::boot.glm(am ~ vs + wt, data = d_rr, family = binomial(),

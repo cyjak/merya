@@ -1,3 +1,13 @@
+# merya 0.7.3
+
+* **Test-suite fix (no change to package behavior):** the
+  `print.boot.lm()`/`print.boot.glm()` regression tests added in 0.7.1
+  referenced `rr_fit` before it was defined later in
+  `tests/test-merya.R` (a test-ordering mistake on my part, not a
+  problem in the package), causing `object 'rr_fit' not found`. The
+  block has been moved to after `or_fit`, `rr_fit`, `rd_fit`,
+  `fit_pcor`, `gfit`, and `fit` are all defined.
+
 # merya 0.7.2
 
 * **Test-suite fix (no change to package behavior):** several

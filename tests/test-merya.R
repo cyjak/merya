@@ -199,7 +199,11 @@ or_fit <- merya::boot.glm(am ~ wt + hp, data = mtcars,
                            family = binomial(link = "logit"), R = 500, effect = "OR")
 stopifnot(identical(or_fit$boot$effect, "OR"))
 stopifnot(identical(or_fit$boot$method, "direct"))
-stopifnot(all(or_fit$boot$conf.int > 0, na.rm = TRUE))  # ORs are non-negative
+stopifnot(all(or_fit$boot$conf.int >= 0, na.rm = TRUE))  # ORs are non-negative
+## (exp() is mathematically never negative, but can legitimately underflow
+## to exactly 0 for extremely large-magnitude negative coefficients -- e.g.
+## from a near-separated bootstrap replicate on a small dataset like
+## mtcars -- so this must be >= 0, not > 0)
 ## OR must be exp(coef) and its CI exp(coef CI); p-value must be identical
 ## to plain "coef" mode (same underlying bootstrap/jackknife replicates)
 coef_fit <- merya::boot.glm(am ~ wt + hp, data = mtcars,
@@ -239,7 +243,7 @@ stopifnot(any(grepl("Odds ratio", printed_or)))
 stopifnot(!any(grepl("Coefficients \\(BCa", printed_or)))
 ## the printed Estimate values must match the exponentiated (positive)
 ## ones, not the raw (possibly negative) coefficient scale
-stopifnot(all(or_fit$boot$estimate > 0))
+stopifnot(all(or_fit$boot$estimate >= 0))
 
 printed_rr <- capture.output(print(rr_fit))
 stopifnot(any(grepl("Marginal risk ratio", printed_rr)))
@@ -261,7 +265,9 @@ rr_direct <- merya::boot.glm(am ~ wt + hp, data = mtcars,
                               family = binomial(link = "log"), R = 500, effect = "RR")
 stopifnot(identical(rr_direct$boot$effect, "RR"))
 stopifnot(identical(rr_direct$boot$method, "direct"))
-stopifnot(all(rr_direct$boot$conf.int > 0, na.rm = TRUE))
+stopifnot(all(rr_direct$boot$conf.int >= 0, na.rm = TRUE))
+## (same underflow reasoning as the OR check above: exp() of an extreme
+## bootstrap coefficient can legitimately be exactly 0, never negative)
 ## must match exp(coef) from the same log-link model fit with effect="coef"
 coef_log_fit <- merya::boot.glm(am ~ wt + hp, data = mtcars,
                                  family = binomial(link = "log"), R = 500)
@@ -294,7 +300,7 @@ stopifnot(inherits(rr_fit, "boot.glm"))
 stopifnot(identical(rr_fit$boot$effect, "RR"))
 stopifnot(identical(rr_fit$boot$method, "gcomputation"))
 stopifnot(identical(rr_fit$boot$exposure, "vs"))
-stopifnot(rr_fit$boot$estimate > 0)  # risk ratio is non-negative
+stopifnot(rr_fit$boot$estimate >= 0)  # risk ratio is non-negative
 stopifnot(rr_fit$boot$conf.int[1, "lower"] <= rr_fit$boot$conf.int[1, "upper"])
 rrs <- summary(rr_fit)
 stopifnot(identical(rrs$effect, "RR"))

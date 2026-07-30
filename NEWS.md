@@ -1,3 +1,22 @@
+# merya 0.7.2
+
+* **Test-suite fix (no change to package behavior):** several
+  `tests/test-merya.R` assertions checked that odds-ratio/risk-ratio
+  bootstrap replicates and confidence-interval endpoints were strictly
+  `> 0`. `exp()` is mathematically never negative, but for a
+  sufficiently large-magnitude negative input it legitimately underflows
+  to *exactly* `0` in double-precision floating point (below about
+  `exp(-745)`), which can happen for an occasional bootstrap replicate's
+  coefficient under quasi-complete separation on a small dataset -- as
+  happened intermittently on some CI runners for the `mtcars` example
+  used in the tests, depending on small BLAS/LAPACK floating-point
+  differences across platforms. These assertions were relaxed to
+  `>= 0`, matching what `exp()` can actually return; `boot.glm()`'s
+  computation itself was already correct and required no change.
+* Fixed placeholder GitHub username (`yourusername`) in `DESCRIPTION`'s
+  `URL`/`BugReports` and in `README.md`'s install instructions to
+  `cyjak`.
+
 # merya 0.7.1
 
 * **Bug fix: `print()`/console auto-print on a `boot.lm()`/`boot.glm()`

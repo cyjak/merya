@@ -49,7 +49,7 @@ theory.
 ```r
 # from GitHub
 # install.packages("remotes")
-remotes::install_github("yourusername/merya")
+remotes::install_github("cyjak/merya")
 
 # from CRAN (once published)
 install.packages("merya")

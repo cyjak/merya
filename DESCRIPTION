@@ -2,7 +2,7 @@ Package: merya
 Type: Package
 Title: Fast BCa Bootstrap Confidence Intervals and CI-Inversion P-Values
     for Common Statistical Tests and Models
-Version: 0.7.1
+Version: 0.7.2
 Authors@R: person(given = "Your", family = "Name",
     email = "you@example.com", role = c("aut", "cre"))
 Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
@@ -39,5 +39,5 @@ Encoding: UTF-8
 Depends: R (>= 3.5.0)
 Imports: stats, utils
 RoxygenNote: 7.3.1
-URL: https://github.com/yourusername/merya
-BugReports: https://github.com/yourusername/merya/issues
+URL: https://github.com/cyjak/merya
+BugReports: https://github.com/cyjak/merya/issues

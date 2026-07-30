@@ -1,3 +1,22 @@
+# merya 0.7.4
+
+* **Test-suite fix (no change to package behavior):**
+  `tests/test-merya.R` fit `binomial(link = "log")` ("log-binomial")
+  models on `mtcars` to test `effect = "RR"`. That family/link
+  combination requires every fitted probability to stay below 1, which
+  this particular formula/data does not satisfy, so plain
+  `stats::glm()` itself fails to converge ("no valid set of
+  coefficients has been found: please supply starting values") before
+  `boot.glm()`'s bootstrap ever runs -- a misspecified model for this
+  data, not a defect in the package. The conditional-RR-via-log-link
+  test now uses a Poisson model instead (still verifying
+  `RR = exp(coef)` against a matching `effect = "coef"` fit), and the
+  narrower "exposure given still triggers g-computation even under a
+  log link" case has been dropped from the suite rather than fit
+  another fragile log-binomial model; the broader "exposure given ->
+  g-computation" behavior remains covered under the default (logit)
+  link.
+
 # merya 0.7.3
 
 * **Test-suite fix (no change to package behavior):** the

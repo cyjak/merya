@@ -481,3 +481,19 @@ print.summary.boot.glm <- function(x, digits = max(3L, getOption("digits") - 3L)
   cat(sprintf("AIC: %s\n", format(signif(x$aic, digits))))
   invisible(x)
 }
+
+#' @export
+#' @method print boot.glm
+print.boot.glm <- function(x, ...) {
+  ## Without this method, print(x) / auto-print at the console would fall
+  ## through to the inherited print.glm(), which always shows the RAW
+  ## model coefficients on the linear-predictor scale (e.g. still negative
+  ## log-odds) regardless of 'effect' -- so simply typing a fitted
+  ## effect = "OR"/"RR" object at the console would look like it returned
+  ## a negative odds/risk ratio, when in fact only summary() had been
+  ## updated to show the exponentiated values. Delegating to summary()
+  ## ensures the console default always matches whichever quantity
+  ## 'effect' selected.
+  print(summary(x, ...))
+  invisible(x)
+}

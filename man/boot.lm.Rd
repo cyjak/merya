@@ -1,6 +1,7 @@
 \name{boot.lm}
 \alias{boot.lm}
 \alias{summary.boot.lm}
+\alias{print.boot.lm}
 \alias{print.summary.boot.lm}
 \title{Linear Regression with BCa Bootstrap Confidence Intervals}
 \description{
@@ -21,6 +22,8 @@ boot.lm(formula, data, subset, weights, na.action, offset,
         pred.r.squared = FALSE, seed = 123, \dots)
 
 \method{summary}{boot.lm}(object, \dots)
+
+\method{print}{boot.lm}(x, \dots)
 
 \method{print}{summary.boot.lm}(x, digits = max(3L, getOption("digits") - 3L), \dots)
 }
@@ -50,7 +53,9 @@ boot.lm(formula, data, subset, weights, na.action, offset,
     whatever random state is currently active (no reseeding), or any
     other integer for a different reproducible draw.}
   \item{object}{a \code{boot.lm} object, for \code{summary}.}
-  \item{x}{a \code{summary.boot.lm} object, for \code{print}.}
+  \item{x}{a \code{boot.lm} object (for \code{print}, which delegates to
+    \code{summary()} so the console default always reflects \code{effect}),
+    or a \code{summary.boot.lm} object (for \code{print.summary.boot.lm}).}
   \item{digits}{number of significant digits for printing.}
   \item{\dots}{further arguments passed to \code{\link[stats]{lm}} (e.g.
     \code{contrasts}).}

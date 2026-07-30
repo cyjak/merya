@@ -1,6 +1,7 @@
 \name{boot.glm}
 \alias{boot.glm}
 \alias{summary.boot.glm}
+\alias{print.boot.glm}
 \alias{print.summary.boot.glm}
 \title{Generalized Linear Regression with BCa Bootstrap Confidence Intervals}
 \description{
@@ -22,6 +23,8 @@ boot.glm(formula, family = stats::gaussian(), data, subset,
          exposure = NULL, seed = 123, \dots)
 
 \method{summary}{boot.glm}(object, \dots)
+
+\method{print}{boot.glm}(x, \dots)
 
 \method{print}{summary.boot.glm}(x, digits = max(3L, getOption("digits") - 3L), \dots)
 }
@@ -70,7 +73,9 @@ boot.glm(formula, family = stats::gaussian(), data, subset,
     whatever random state is currently active (no reseeding), or any
     other integer for a different reproducible draw.}
   \item{object}{a \code{boot.glm} object, for \code{summary}.}
-  \item{x}{a \code{summary.boot.glm} object, for \code{print}.}
+  \item{x}{a \code{boot.glm} object (for \code{print}, which delegates to
+    \code{summary()} so the console default always reflects \code{effect}),
+    or a \code{summary.boot.glm} object (for \code{print.summary.boot.glm}).}
   \item{digits}{number of significant digits for printing.}
   \item{\dots}{further arguments passed to \code{\link[stats]{glm}} for
     the single full-data fit (e.g. \code{contrasts}); does not affect

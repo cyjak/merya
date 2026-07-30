@@ -1,3 +1,24 @@
+# merya 0.7.1
+
+* **Bug fix: `print()`/console auto-print on a `boot.lm()`/`boot.glm()`
+  object now always reflects the requested `effect`.** Previously, no
+  `print` method was defined for these classes, so simply typing a
+  fitted object at the console (or calling `print(fit)`) fell through to
+  the inherited `print.lm()`/`print.glm()`, which always shows the raw
+  model coefficients on their native scale -- e.g. a legitimately
+  negative log-odds coefficient, even when `effect = "OR"` had been
+  requested. This could easily be misread as "a negative odds ratio",
+  when the actual (correctly positive) exponentiated odds ratio was only
+  ever shown by `summary()`. New `print.boot.lm()`/`print.boot.glm()`
+  methods now delegate to `summary()`, so the console default always
+  matches whichever quantity `effect` selected; this does not change any
+  computed value, only what is shown by default. Regression tests added.
+* The bundled `.github/workflows/R-CMD-check.yaml` now uses
+  `actions/checkout@v5` instead of `@v4`, which resolves the "Node.js 20
+  actions are deprecated" warning some CI runs showed; this warning was
+  a platform-wide GitHub Actions runner notice unrelated to any R code
+  in this package (it did not indicate a check failure).
+
 # merya 0.7.0
 
 * **`boot.glm()`'s `effect` argument is reworked and gains two new

@@ -354,3 +354,16 @@ print.summary.boot.lm <- function(x, digits = max(3L, getOption("digits") - 3L),
   }
   invisible(x)
 }
+
+#' @export
+#' @method print boot.lm
+print.boot.lm <- function(x, ...) {
+  ## Without this method, print(x) / auto-print at the console would fall
+  ## through to the inherited print.lm(), which always shows the RAW,
+  ## un-transformed model coefficients regardless of 'effect' -- e.g. still
+  ## negative log-odds-scale-like slopes even when effect = "partial.eta2"
+  ## was requested. Delegating to summary() ensures the console default
+  ## always matches whichever quantity 'effect' selected.
+  print(summary(x, ...))
+  invisible(x)
+}

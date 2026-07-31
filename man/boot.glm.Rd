@@ -160,8 +160,9 @@ summary(fit)
 summary(boot.glm(am ~ wt + hp, data = mtcars, family = binomial(),
                   R = 500, effect = "OR"))
 
-## conditional risk ratios for every predictor (requires a log link)
-summary(boot.glm(am ~ wt + hp, data = mtcars, family = binomial(link = "log"),
+## conditional risk ratios for every predictor (requires a log link,
+## but works for any family -- e.g. Poisson, not just binomial)
+summary(boot.glm(carb ~ wt, data = mtcars, family = poisson(link = "log"),
                   R = 500, effect = "RR"))
 
 ## marginal risk ratio / risk difference for a binary predictor,

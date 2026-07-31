@@ -1,3 +1,27 @@
+# merya 0.7.5
+
+* **Fixed the same misspecified-model issue as 0.7.4, this time in
+  documentation, not tests.** `boot.glm()`'s `\examples{}` block (in
+  both the roxygen source and `man/boot.glm.Rd`, which `R CMD check`
+  executes as part of "checking examples") and `README.md` still fit a
+  `binomial(link = "log")` model on `am ~ wt + hp` / `mtcars` to
+  illustrate conditional risk ratios. As previously diagnosed, this
+  combination fails to converge in plain `stats::glm()` on this
+  particular data (predicted probabilities would need to exceed 1),
+  independent of `boot.glm()`. All three now use the same
+  `poisson(link = "log")` example already used in the test suite
+  (`carb ~ wt`), which converges reliably and still demonstrates that
+  the conditional-RR path works for any family given a log link, not
+  just binomial.
+* **Fixed `R CMD check` NOTE: "Namespace in Imports field not imported
+  from: 'utils'".** `utils` was declared in `DESCRIPTION`'s `Imports`
+  but never actually used anywhere in the package's `R/` code (a
+  leftover from an earlier development stage); it has been removed.
+  The package's only dependency is now `stats`. (`tests/test-merya.R`'s
+  use of `capture.output()`, from `utils`, is unaffected: test scripts
+  run with all default packages already attached, so they don't need a
+  package `Imports` declaration the way namespaced package code does.)
+
 # merya 0.7.4
 
 * **Test-suite fix (no change to package behavior):**

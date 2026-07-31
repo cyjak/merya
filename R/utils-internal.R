@@ -2,7 +2,7 @@
 ## confidence-interval-inversion p-values. Not exported.
 ##
 ## Design goals:
-##  - base R only (stats/utils, which ship with every R installation)
+##  - base R only (stats, which ships with every R installation)
 ##  - vectorized resampling (single index matrix, matrix algebra) instead of
 ##    per-replicate loops wherever the statistic admits a closed form
 ##  - closed-form BCa inversion for p-values (no bisection / root-finding)

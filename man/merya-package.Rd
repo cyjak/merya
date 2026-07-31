@@ -13,7 +13,7 @@ p-values, instead of relying on classical asymptotic distributions. All
 bootstrap-based functions default to \code{R = 10000} replicates and to
 a fixed \code{seed = 123} for reproducibility (set \code{seed = NULL}
 to use whatever random state is currently active instead). The entire
-package depends only on base R (\code{stats} and \code{utils}), with no
+package depends only on base R (\code{stats}), with no
 other package dependencies.
 }
 \details{

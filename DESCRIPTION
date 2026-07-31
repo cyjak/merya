@@ -2,7 +2,7 @@ Package: merya
 Type: Package
 Title: Fast BCa Bootstrap Confidence Intervals and CI-Inversion P-Values
     for Common Statistical Tests and Models
-Version: 0.7.4
+Version: 0.7.5
 Authors@R: person(given = "Your", family = "Name",
     email = "you@example.com", role = c("aut", "cre"))
 Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
@@ -28,8 +28,8 @@ Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
     any other integer, or to NULL to use whatever random state is
     currently active instead of reseeding). The bootstrap resampling,
     BCa transform, and CI-inversion p-value machinery is implemented
-    entirely in base R (using only the 'stats' and 'utils' packages that
-    ship with every R installation, with no other dependencies);
+    entirely in base R (using only the 'stats' package that ships with
+    every R installation, with no other dependencies);
     resampling is vectorized wherever a closed-form statistic allows it,
     and the BCa transform is inverted analytically for p-values (no
     bisection / root-finding), which keeps the bootstrap and p-value
@@ -37,7 +37,7 @@ Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 3.5.0)
-Imports: stats, utils
+Imports: stats
 RoxygenNote: 7.3.1
 URL: https://github.com/cyjak/merya
 BugReports: https://github.com/cyjak/merya/issues

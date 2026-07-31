@@ -12,8 +12,8 @@ theory.
 - Same arguments as the functions you already know.
 - Same output classes (`"htest"`, `"lm"`, `"glm"`) — existing code,
   `print()`, `summary()`, `predict()`, etc. keep working.
-- **Base R only.** No dependencies beyond `stats` and `utils`, which
-  ship with every R installation.
+- **Base R only.** No dependencies beyond `stats`, which ships with
+  every R installation.
 - **Built for speed.** Resampling is vectorized wherever a closed-form
   statistic allows it, and the BCa transform is inverted *analytically*
   for p-values.
@@ -89,7 +89,7 @@ summary(boot.glm(am ~ wt + hp, data = mtcars, family = binomial(),
                   effect = "OR"))
 
 ## conditional risk ratios for every predictor (any family, log link)
-summary(boot.glm(am ~ wt + hp, data = mtcars, family = binomial(link = "log"),
+summary(boot.glm(carb ~ wt, data = mtcars, family = poisson(link = "log"),
                   effect = "RR"))
 
 ## marginal risk ratio / risk difference for a binary predictor,

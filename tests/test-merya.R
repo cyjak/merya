@@ -1,5 +1,5 @@
 ## Simple base-R regression tests (no external test framework). The
-## package has zero dependencies beyond stats/utils, so every test here
+## package has zero dependencies beyond stats, so every test here
 ## runs unconditionally (no Suggests-gated skips). Run automatically by
 ## R CMD check as part of tests/.
 

@@ -113,8 +113,11 @@
 #'   predictors contribute a single row (one counterfactual scenario:
 #'   everyone at the reference level), and only simple, untransformed,
 #'   non-interaction predictor terms are supported for \code{"PAF"} (a
-#'   term must match a raw column name in \code{data}; interactions or
-#'   transformations such as \code{poly()}/\code{log()} raise an error).
+#'   term must be a bare variable name; interactions or transformations
+#'   such as \code{poly()}/\code{log()} raise an error). \code{"PAF"}
+#'   works whether or not \code{data} is supplied (formula variables may
+#'   instead live in the calling environment, as for \code{glm()}
+#'   itself).
 #'
 #'   For all three g-computation cases, each bootstrap replicate
 #'   resamples whole rows (outcome and covariates together), refits the
@@ -359,7 +362,7 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
     )
   } else {
     ## effect == "PAF"
-    recipes <- .paf_recipes(mt, data, X)
+    recipes <- .paf_recipes(mt, mf, X)
     nm <- vapply(recipes, function(r) r$name, character(1))
     k <- length(recipes)
 

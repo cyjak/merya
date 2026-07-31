@@ -364,6 +364,24 @@ stopifnot(inherits(
            error = function(e) e),
   "error"))
 
+## Regression test: effect = "PAF" must work without a 'data' argument,
+## i.e. with formula variables taken from the calling environment, exactly
+## like glm()/every other 'effect' option already does. (Previously this
+## failed because an internal helper referenced the raw, unsupplied 'data'
+## argument directly instead of the already-built model frame.)
+y_nd <- d_rr$am
+vs_nd <- d_rr$vs
+wt_nd <- d_rr$wt
+paf_fit_nodata <- merya::boot.glm(y_nd ~ vs_nd + wt_nd, family = binomial(),
+                                   R = 500, effect = "PAF")
+stopifnot(identical(paf_fit_nodata$boot$effect, "PAF"))
+stopifnot(setequal(rownames(paf_fit_nodata$boot$conf.int), c("vs_nd", "wt_nd")))
+## same underlying data, same default seed -> numerically identical
+## estimates to the 'data =' version above (only the row labels differ,
+## since the two formulas use differently-named copies of the same values)
+stopifnot(isTRUE(all.equal(unname(paf_fit_nodata$boot$estimate),
+                            unname(paf_fit$boot$estimate))))
+
 cat("boot.glm PAF tests passed.\n")
 
 cat("All merya smoke tests passed.\n")

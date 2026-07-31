@@ -660,33 +660,45 @@
 #' usual treatment contrasts) or "continuous" (numeric -- the
 #' counterfactual value is "everyone at the sample mean").
 #'
-#' Interaction terms and terms that don't match a raw column name in
-#' \code{data} (e.g. \code{poly(x, 2)}, \code{log(x)}) are not supported
-#' -- the "set to reference/mean for everyone" counterfactual has no
-#' unambiguous meaning for a transformed or interaction term -- so this
-#' errors out (rather than silently skipping them) if any are found,
-#' listing the offending term(s).
+#' Interaction terms and terms that don't reduce to a single, bare
+#' variable name (e.g. \code{poly(x, 2)}, \code{log(x)}) are not
+#' supported -- the "set to reference/mean for everyone" counterfactual
+#' has no unambiguous meaning for a transformed or interaction term --
+#' so this errors out (rather than silently skipping them) if any are
+#' found, listing the offending term(s).
 #'
 #' @param mt the model \code{terms} object
-#' @param data the original (raw, untransformed) data actually used by the
-#'   fit
+#' @param mf the model \code{frame} actually used by the fit (as built by
+#'   \code{stats::model.frame()}; always available and already resolved
+#'   against \code{data}/the calling environment as appropriate, unlike
+#'   the raw \code{data} argument, which may not have been supplied)
 #' @param X the fitted model matrix (for its \code{"assign"} attribute)
 #' @return a list; each element is \code{list(name, type, cols)} where
 #'   \code{cols} are the design-matrix column indices for that term
 #' @keywords internal
 #' @noRd
-.paf_recipes <- function(mt, data, X) {
+.paf_recipes <- function(mt, mf, X) {
   term.labels <- attr(mt, "term.labels")
   if (length(term.labels) == 0L) {
     stop("boot.glm(): effect = \"PAF\" requires at least one predictor term.",
          call. = FALSE)
   }
   assign_vec <- attr(X, "assign")
+  ## a "simple" term is a single bare variable name -- no interactions
+  ## (already excluded by the caller not being reached here for those, but
+  ## checked again for safety) and no transformations/function calls such
+  ## as poly(x)/log(x)/I(x^2). This is checked syntactically (valid R
+  ## identifier), not via names(data), because 'data' itself may not have
+  ## been supplied (formula variables can instead live in the calling
+  ## environment) -- but a model frame column literally named "log(x)"
+  ## would otherwise wrongly look like a match if names(mf) were used
+  ## for this check.
+  is_simple_name <- grepl("^[.a-zA-Z][.a-zA-Z0-9_]*$", term.labels)
   bad <- character(0)
   recipes <- list()
   for (i in seq_along(term.labels)) {
     term <- term.labels[i]
-    if (grepl(":", term, fixed = TRUE) || !term %in% names(data)) {
+    if (!is_simple_name[i] || !term %in% names(mf)) {
       bad <- c(bad, term)
       next
     }
@@ -695,15 +707,15 @@
       bad <- c(bad, term)
       next
     }
-    v <- data[[term]]
+    v <- mf[[term]]
     type <- if (is.factor(v) || is.character(v) || is.logical(v)) "categorical" else "continuous"
     recipes[[length(recipes) + 1L]] <- list(name = term, type = type, cols = cols)
   }
   if (length(bad) > 0L) {
     stop("boot.glm(): effect = \"PAF\" only supports simple, untransformed, ",
-         "non-interaction predictor terms (each term must match a raw ",
-         "column name in 'data', with no interactions or transformations ",
-         "such as poly()/log()); please refit without: ",
+         "non-interaction predictor terms (each term must be a bare ",
+         "variable name, not an interaction or a transformation such as ",
+         "poly()/log()); please refit without: ",
          paste(bad, collapse = ", "), ".", call. = FALSE)
   }
   recipes

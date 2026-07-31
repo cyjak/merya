@@ -1,3 +1,23 @@
+# merya 0.7.6
+
+* **Bug fix: `boot.glm(..., effect = "PAF")` now works without a `data`
+  argument**, i.e. with formula variables taken from the calling
+  environment, exactly like `glm()` and every other `effect` option
+  already allowed. Previously, an internal helper
+  (`.paf_recipes()`) referenced the raw `data` argument directly to
+  classify each predictor as categorical or continuous; since `data`
+  has no default, simply touching it when it hadn't been supplied threw
+  `argument "data" is missing, with no default` (surfacing as a
+  confusing secondary error during `summary()`/error-condition
+  dispatch, e.g. `l'argument "data" est manquant, avec aucune valeur
+  par défaut` in French R sessions). The helper now uses the model
+  frame that `boot.glm()` already builds internally (which is always
+  available and correctly resolved against `data`/the calling
+  environment either way), with an updated, syntax-based check for
+  "simple, untransformed variable name" that still correctly rejects
+  interactions and transformed terms like `poly()`/`log()`. Regression
+  test added.
+
 # merya 0.7.5
 
 * **Fixed the same misspecified-model issue as 0.7.4, this time in

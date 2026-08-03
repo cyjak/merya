@@ -29,10 +29,15 @@
 #'   share of the total variance in the response). The intercept is
 #'   never reported for the three effect-size options (only for
 #'   \code{"coef"}).
-#' @param pred.r.squared logical; if \code{TRUE}, additionally compute a
-#'   predicted R-squared (leave-one-out cross-validated), reported
-#'   alongside whichever \code{effect} was requested. \code{FALSE} by
-#'   default (not computed). See Details.
+#' @param pred.r.squared logical; if \code{TRUE}, additionally compute the
+#'   textbook "predicted R-squared" (\code{1 - PRESS/TSS}, leave-one-out
+#'   cross-validated), reported alongside whichever \code{effect} was
+#'   requested. Unlike ordinary or partial/semi-partial eta-squared, this
+#'   is not bounded below by 0 -- a model that predicts worse than just
+#'   the response mean legitimately has a negative predicted R-squared,
+#'   and this is preserved rather than treated as bootstrap noise around
+#'   a non-negative quantity. \code{FALSE} by default (not computed). See
+#'   Details.
 #' @param ... further arguments passed to \code{\link[stats]{lm}} (e.g.
 #'   \code{contrasts}).
 #'
@@ -88,23 +93,29 @@
 #'   where \eqn{\hat\beta_{(-j)}} is the coefficient vector from the same
 #'   model refit excluding observation \eqn{j} -- obtained in closed form
 #'   via the hat-matrix identity (no refitting), the same one used for
-#'   \code{effect = "coef"}'s BCa acceleration constant. The (signed)
-#'   correlation between the observed response and these leave-one-out
-#'   predictions is bootstrapped (each replicate resamples rows, refits,
-#'   and repeats the same leave-one-out-within-the-replicate calculation
-#'   on its own resampled data) and given a BCa confidence interval and
-#'   CI-inversion p-value exactly as for the signed statistics underlying
-#'   \code{"partial.eta2"}/\code{"eta2"}; predicted R-squared is then
-#'   this correlation's square, with its confidence interval obtained the
-#'   same way (BCa interval on the signed correlation, converted to the
-#'   squared scale by taking the smallest/largest absolute value attained
-#'   within it as the new lower/upper bound before squaring). The BCa
-#'   acceleration constant for the signed correlation itself is
-#'   approximated with a fast closed-form "delete-one-pair" leave-one-out
-#'   correlation (excluding one (response, leave-one-out-prediction) pair
-#'   at a time from the full-sample leave-one-out predictions, rather
-#'   than a full nested double-jackknife), consistent with the
-#'   closed-form/one-step approximations used throughout this package.
+#'   \code{effect = "coef"}'s BCa acceleration constant. From these,
+#'   \eqn{\mathrm{PRESS} = \sum_j (y_j - x_j'\hat\beta_{(-j)})^2} (the
+#'   leave-one-out predicted error sum of squares) and predicted
+#'   R-squared is \eqn{1 - \mathrm{PRESS}/\mathrm{TSS}}, where
+#'   \eqn{\mathrm{TSS}} is the total sum of squares -- the standard
+#'   definition of predicted R-squared (as reported by, e.g., Minitab and
+#'   most regression-diagnostics references). This quantity is already on
+#'   its natural, signed scale (it is not a square of anything), so it is
+#'   bootstrapped directly (each replicate resamples rows, refits, and
+#'   repeats the same leave-one-out-within-the-replicate PRESS/TSS
+#'   calculation on its own resampled data) and given a BCa confidence
+#'   interval and CI-inversion p-value with no separate sign-handling
+#'   transform of any kind -- unlike \code{"partial.eta2"}/\code{"eta2"},
+#'   which square a signed correlation that is known to estimate a
+#'   non-negative population quantity, predicted R-squared's negative
+#'   values are directly meaningful (the model predicts worse than the
+#'   mean) and are not an artifact to be corrected for. The BCa
+#'   acceleration constant is approximated with a fast closed-form
+#'   "delete-one" leave-one-out PRESS/TSS (excluding one observation's
+#'   own term from the full-sample PRESS sum, and using the same
+#'   closed-form leave-one-out TSS identity as \code{"eta2"}, rather than
+#'   a full nested double-jackknife), consistent with the closed-form/
+#'   one-step approximations used throughout this package.
 #'
 #' @examples
 #' fit <- boot.lm(mpg ~ wt + hp, data = mtcars, R = 500)
@@ -252,11 +263,21 @@ boot.lm <- function(formula, data, subset, weights, na.action, offset,
   }
 
   if (isTRUE(pred.r.squared)) {
+    ## Textbook "predicted R-squared": 1 - PRESS/TSS, where PRESS is the
+    ## leave-one-out predicted error sum of squares. This is already on
+    ## its natural (signed, unbounded-below) scale -- a model that
+    ## predicts worse than the mean legitimately gives a negative value
+    ## here -- so, unlike partial.eta2/eta2, no separate sign-preserving
+    ## square transform is applied anywhere: the BCa interval is built
+    ## directly on this statistic.
     pred_loo_full <- rowSums(Xs * loo_coef)
-    theta_hat_predR <- stats::cor(ys, pred_loo_full)
+    has_icpt_predR <- "(Intercept)" %in% colnames(Xs)
+    tss_hat <- sum((ys - if (has_icpt_predR) mean(ys) else 0)^2)
+    press_hat <- sum((ys - pred_loo_full)^2)
+    theta_hat_predR <- if (tss_hat > 0) 1 - press_hat / tss_hat else NA_real_
 
-    boot_predR <- .boot_lm_predR(Xs, ys, R)
-    loo_predR  <- .loo_cor_exclude_pairs(ys, pred_loo_full)
+    boot_predR <- .boot_lm_predR2(Xs, ys, R)
+    loo_predR  <- .jack_lm_predR2(ys, pred_loo_full, has_icpt_predR)
 
     ok <- stats::complete.cases(boot_predR)
     tb <- boot_predR[ok]
@@ -265,12 +286,12 @@ boot.lm <- function(formula, data, subset, weights, na.action, offset,
       pval_predR <- NA_real_
     } else {
       out <- .bca_ci(tb, theta_hat_predR, loo_predR, conf.level)
-      ci_predR <- .signed_ci_to_squared(as.numeric(out))
+      ci_predR <- as.numeric(out)
       pval_predR <- .bca_pvalue(0, tb, theta_hat_predR, attr(out, "a"), "two.sided")
     }
 
     fit$boot$pred.r.squared <- list(
-      estimate   = theta_hat_predR^2,
+      estimate   = theta_hat_predR,
       conf.int   = matrix(ci_predR, nrow = 1L, dimnames = list("pred.r.squared", c("lower", "upper"))),
       p.value    = pval_predR,
       conf.level = conf.level,

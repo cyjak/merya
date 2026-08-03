@@ -43,10 +43,15 @@ boot.lm(formula, data, subset, weights, na.action, offset,
     share of the total variance in the response). The intercept is
     never reported for the three effect-size options (only for
     \code{"coef"}).}
-  \item{pred.r.squared}{logical; if \code{TRUE}, additionally compute a
-    predicted R-squared (leave-one-out cross-validated), reported
-    alongside whichever \code{effect} was requested. \code{FALSE} by
-    default (not computed). See Details.}
+  \item{pred.r.squared}{logical; if \code{TRUE}, additionally compute the
+    textbook "predicted R-squared" (\code{1 - PRESS/TSS}, leave-one-out
+    cross-validated), reported alongside whichever \code{effect} was
+    requested. Unlike ordinary or partial/semi-partial eta-squared, this
+    is not bounded below by 0 -- a model that predicts worse than just
+    the response mean legitimately has a negative predicted R-squared,
+    and this is preserved rather than treated as bootstrap noise around
+    a non-negative quantity. \code{FALSE} by default (not computed). See
+    Details.}
   \item{seed}{integer seed used to make the bootstrap resampling
     reproducible; set via \code{\link[base]{set.seed}} at the start of
     the function. Defaults to \code{123}; pass \code{NULL} to use
@@ -86,21 +91,28 @@ leave-one-out predicted value is \eqn{x_j'\hat\beta_{(-j)}}, where
 \eqn{\hat\beta_{(-j)}} is the coefficient vector from the same model
 refit excluding observation \eqn{j} -- obtained in closed form via the
 hat-matrix identity (no refitting), the same one used for \code{effect =
-"coef"}'s BCa acceleration constant. The (signed) correlation between
-the observed response and these leave-one-out predictions is
-bootstrapped (each replicate resamples rows, refits, and repeats the
-same leave-one-out-within-the-replicate calculation on its own resampled
-data) and given a BCa confidence interval and CI-inversion p-value
-exactly as for the signed statistics underlying
-\code{"partial.eta2"}/\code{"eta2"}; predicted R-squared is then this
-correlation's square, with its confidence interval obtained the same way
-(BCa interval on the signed correlation, converted to the squared scale
-by taking the smallest/largest absolute value attained within it as the
-new lower/upper bound before squaring). The BCa acceleration constant
-for the signed correlation itself is approximated with a fast
-closed-form "delete-one-pair" leave-one-out correlation (excluding one
-(response, leave-one-out-prediction) pair at a time from the full-sample
-leave-one-out predictions, rather than a full nested double-jackknife).
+"coef"}'s BCa acceleration constant. From these, \eqn{\mathrm{PRESS} =
+\sum_j (y_j - x_j'\hat\beta_{(-j)})^2} (the leave-one-out predicted error
+sum of squares) and predicted R-squared is \eqn{1 -
+\mathrm{PRESS}/\mathrm{TSS}}, where \eqn{\mathrm{TSS}} is the total sum
+of squares -- the standard definition of predicted R-squared (as
+reported by, e.g., Minitab and most regression-diagnostics references).
+This quantity is already on its natural, signed scale (it is not a
+square of anything), so it is bootstrapped directly (each replicate
+resamples rows, refits, and repeats the same
+leave-one-out-within-the-replicate PRESS/TSS calculation on its own
+resampled data) and given a BCa confidence interval and CI-inversion
+p-value with no separate sign-handling transform of any kind -- unlike
+\code{"partial.eta2"}/\code{"eta2"}, which square a signed correlation
+that is known to estimate a non-negative population quantity, predicted
+R-squared's negative values are directly meaningful (the model predicts
+worse than the mean) and are not an artifact to be corrected for. The BCa
+acceleration constant is approximated with a fast closed-form
+"delete-one" leave-one-out PRESS/TSS (excluding one observation's own
+term from the full-sample PRESS sum, and using the same closed-form
+leave-one-out TSS identity as \code{"eta2"}, rather than a full nested
+double-jackknife), consistent with the closed-form/one-step
+approximations used throughout this package.
 }
 \value{
 An object of class \code{c("boot.lm", "lm")}: identical to what

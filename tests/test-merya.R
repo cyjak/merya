@@ -144,6 +144,11 @@ stopifnot(isTRUE(all.equal(fit_default_a$boot$conf.int, fit_default_b$boot$conf.
 cat("boot.lm effect-size tests passed.\n")
 
 ## ---- boot.lm: pred.r.squared ---------------------------------------------
+## Textbook definition: 1 - PRESS/TSS. Unlike partial.eta2/eta2, this is
+## NOT bounded below by 0 -- a model that predicts worse than the mean
+## legitimately scores negative, and that must be preserved, not squared
+## away (squaring would make a strongly-negative, "worse than useless"
+## result look like weak-but-positive evidence of predictive value).
 fit_predR_off <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300)
 stopifnot(is.null(fit_predR_off$boot$pred.r.squared))  # off by default
 
@@ -151,8 +156,7 @@ fit_predR <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 500,
                              pred.r.squared = TRUE)
 pr <- fit_predR$boot$pred.r.squared
 stopifnot(!is.null(pr))
-stopifnot(pr$estimate >= 0)  # it's a square, must be non-negative
-stopifnot(all(pr$conf.int >= 0, na.rm = TRUE))
+stopifnot(pr$estimate <= 1)  # 1 - PRESS/TSS can't exceed 1 (PRESS >= 0)
 stopifnot(pr$conf.int[1, "lower"] <= pr$conf.int[1, "upper"])
 stopifnot(is.finite(pr$p.value), pr$p.value >= 0, pr$p.value <= 1)
 ## should coexist with any effect= choice
@@ -161,6 +165,8 @@ fit_predR_eta2 <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 500,
 stopifnot(!is.null(fit_predR_eta2$boot$pred.r.squared))
 stopifnot(identical(fit_predR_eta2$boot$effect, "eta2"))
 ## predicted R-squared should not exceed ordinary (in-sample) R-squared
+## (a well-known property of the PRESS-based definition: leave-one-out
+## residuals are always at least as large in magnitude as in-sample ones)
 stopifnot(pr$estimate <= summary.lm(fit_predR)$r.squared + 1e-8)
 ## summary() should print without erroring and expose it
 s_predR <- summary(fit_predR)
@@ -173,6 +179,20 @@ fit_predR_r2 <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300,
                                 pred.r.squared = TRUE)
 stopifnot(isTRUE(all.equal(fit_predR_r1$boot$pred.r.squared$conf.int,
                             fit_predR_r2$boot$pred.r.squared$conf.int)))
+
+## a genuinely bad model (more noise predictors than signal, few
+## observations) must report a NEGATIVE predicted R-squared, not a
+## small positive one -- this is the behavior the PRESS/TSS definition
+## is specifically for, and squaring a signed correlation would have
+## hidden it
+set.seed(70)
+n_bad <- 15
+d_bad <- data.frame(y = rnorm(n_bad))
+for (j in 1:8) d_bad[[paste0("x", j)]] <- rnorm(n_bad)  # pure noise predictors
+fit_bad <- merya::boot.lm(y ~ ., data = d_bad, R = 500, pred.r.squared = TRUE)
+pr_bad <- fit_bad$boot$pred.r.squared
+stopifnot(pr_bad$estimate < 0)
+stopifnot(pr_bad$conf.int[1, "lower"] < 0)
 
 cat("boot.lm pred.r.squared tests passed.\n")
 

@@ -294,22 +294,28 @@
   list(conf.int = ci, p.value = pval)
 }
 
-#' Fast case-resampling bootstrap of the "predicted R" statistic used by
-#' boot.lm()'s \code{pred.r.squared} option: for each replicate,
-#' resample rows, refit OLS via the same Cholesky solve used elsewhere
-#' (\code{.boot_lm_coef}), then -- reusing the exact leave-one-out
-#' identity already used for the BCa acceleration constant
-#' (\code{.jack_lm_coef}), but now applied *within* this one replicate's
-#' own resampled data -- get every resampled observation's leave-one-out
-#' predicted value, and return the (signed) Pearson correlation between
-#' the resampled response and those leave-one-out predictions. This is
-#' the quantity whose square is reported as "predicted R-squared".
+#' Fast case-resampling bootstrap of the textbook "predicted R-squared"
+#' statistic used by boot.lm()'s \code{pred.r.squared} option:
+#' \eqn{1 - PRESS/TSS}, where \code{PRESS} is the leave-one-out
+#' predicted error sum of squares and \code{TSS} the total sum of
+#' squares. For each replicate, resample rows, refit OLS via the same
+#' Cholesky solve used elsewhere (\code{.boot_lm_coef}), then -- reusing
+#' the exact leave-one-out identity already used for the BCa
+#' acceleration constant (\code{.jack_lm_coef}), but now applied
+#' *within* this one replicate's own resampled data -- get every
+#' resampled observation's leave-one-out predicted value and compute
+#' \code{PRESS}/\code{TSS} from them directly. Unlike a squared
+#' correlation, this statistic is already on its natural (signed,
+#' unbounded-below) scale, so no separate sign-preserving transform is
+#' needed anywhere downstream: a model that predicts worse than the
+#' mean gives a negative value here, exactly as the textbook definition
+#' intends, and the BCa interval is built on this statistic directly.
 #'
 #' @return length-R numeric vector (NA for replicates whose refit failed
-#'   or were otherwise degenerate)
+#'   or were otherwise degenerate, e.g. a constant resampled response)
 #' @keywords internal
 #' @noRd
-.boot_lm_predR <- function(X, y, R) {
+.boot_lm_predR2 <- function(X, y, R) {
   n <- nrow(X); p <- ncol(X)
   df_resid <- n - p
   idx <- .boot_idx(n, R)
@@ -337,44 +343,52 @@
     beta_loo_b <- sweep(-delta_b, 2, beta_b, "+")     # n x p, within-replicate LOO coefs
     pred_loo_b <- rowSums(Xb * beta_loo_b)            # n, within-replicate LOO predictions
 
-    if (stats::sd(pred_loo_b) <= 0 || stats::sd(yb) <= 0) next
-    out[b] <- stats::cor(yb, pred_loo_b)
+    tss_b <- sum((yb - mean(yb))^2)
+    if (!(tss_b > 0)) next
+    press_b <- sum((yb - pred_loo_b)^2)
+    out[b] <- 1 - press_b / tss_b
   }
   out
 }
 
-#' Closed-form "delete-one-pair" leave-one-out correlation between two
-#' vectors, used only for the BCa acceleration constant of
-#' \code{pred.r.squared}: rather than a full nested double-jackknife (for
-#' each held-out observation, refitting *and* recomputing every other
-#' observation's own leave-one-out prediction on the reduced (n-1)-point
-#' sample -- an O(n^2)-ish computation), this reuses the already-computed
-#' full-sample leave-one-out predictions and simply excludes one
-#' (response, prediction) pair at a time from the correlation formula,
-#' via the standard incremental sum-of-squares/sum-of-products identity.
-#' This is an approximation of the true nested jackknife (it does not
-#' re-derive each remaining point's leave-one-out prediction under the
-#' (n-1)-point sample), consistent with the fast, one-step/closed-form
-#' jackknife approximations already used elsewhere in this package, and
-#' keeps the whole computation O(n) instead of O(n^2).
+#' Closed-form "delete-one" approximate leave-one-out value of the
+#' textbook predicted R-squared (\eqn{1 - PRESS/TSS}), used only for the
+#' BCa acceleration constant: rather than a full nested double-jackknife
+#' (for each held-out observation, refitting *and* recomputing every
+#' other observation's own leave-one-out prediction on the reduced
+#' (n-1)-point sample -- an O(n^2)-ish computation), this reuses the
+#' already-computed full-sample leave-one-out predictions and the
+#' closed-form leave-one-out TSS identity (the same one used in
+#' \code{.jack_lm_effect}'s \code{"eta2"} branch) to get PRESS and TSS
+#' with observation \code{i} excluded, for every \code{i} at once, fully
+#' vectorized. This is an approximation of the true nested jackknife (it
+#' does not re-derive each remaining point's own leave-one-out
+#' prediction under the (n-1)-point sample), consistent with the fast,
+#' one-step/closed-form jackknife approximations already used elsewhere
+#' in this package, and keeps the whole computation O(n) instead of
+#' O(n^2).
 #'
-#' @param u,v numeric vectors of the same length (response, leave-one-out
-#'   predictions)
-#' @return length-n numeric vector of leave-one-out correlations
+#' @param y response vector
+#' @param pred_loo_full full-sample leave-one-out predictions (from
+#'   \code{.jack_lm_coef}-derived coefficients), same length as \code{y}
+#' @param has_icpt whether the model has an intercept (affects the
+#'   leave-one-out TSS formula, as in \code{.jack_lm_effect})
+#' @return length-n numeric vector of leave-one-out predicted R-squared
+#'   values (\code{NA} where the leave-one-out TSS is non-positive)
 #' @keywords internal
 #' @noRd
-.loo_cor_exclude_pairs <- function(u, v) {
-  n <- length(u)
-  m <- n - 1
-  Su <- sum(u); Sv <- sum(v)
-  Suu <- sum(u^2); Svv <- sum(v^2); Suv <- sum(u * v)
-  Su_i <- Su - u;   Sv_i <- Sv - v
-  Suu_i <- Suu - u^2; Svv_i <- Svv - v^2; Suv_i <- Suv - u * v
-  cov_i  <- Suv_i - Su_i * Sv_i / m
-  varu_i <- Suu_i - Su_i^2 / m
-  varv_i <- Svv_i - Sv_i^2 / m
-  denom <- sqrt(varu_i * varv_i)
-  ifelse(denom > 0, cov_i / denom, NA_real_)
+.jack_lm_predR2 <- function(y, pred_loo_full, has_icpt = TRUE) {
+  n <- length(y)
+  press_full <- sum((y - pred_loo_full)^2)
+  press_loo <- press_full - (y - pred_loo_full)^2   # PRESS with obs i excluded
+
+  if (has_icpt) {
+    Syy <- sum(y^2); Sy <- sum(y)
+    tss_loo <- (Syy - y^2) - (Sy - y)^2 / (n - 1)    # closed-form leave-one-out TSS
+  } else {
+    tss_loo <- sum(y^2) - y^2
+  }
+  ifelse(tss_loo > 0, 1 - press_loo / tss_loo, NA_real_)
 }
 
 #' Given a BCa confidence interval computed on a *signed* statistic (one

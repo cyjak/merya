@@ -1,3 +1,31 @@
+# merya 0.8.0
+
+* **`boot.lm()`'s `pred.r.squared` now uses the textbook "predicted
+  R-squared" definition, `1 - PRESS/TSS`, instead of a squared
+  leave-one-out correlation.** This is a deliberate behavior change, not
+  a bug fix: the previous implementation bootstrapped the (signed)
+  correlation between the observed response and leave-one-out
+  predictions and then squared it using the same sign-preserving
+  transform as `"partial.eta2"`/`"eta2"`. That transform is only valid
+  when the population-level quantity is known to be non-negative (true
+  for eta-squared, a variance decomposition), which is *not* true of
+  predictive performance -- a model that predicts worse than just the
+  response mean has genuinely, meaningfully negative predictive value,
+  and squaring silently converted that into a small positive number
+  (e.g. a correlation of -0.20 with 95% CI [-0.5, 0.1] became a
+  "predicted R-squared" of 0.04 with CI [0.01, 0.25], reading as weak
+  evidence of usefulness when the evidence actually pointed the other
+  way). `1 - PRESS/TSS` is already on its natural, correctly signed,
+  unbounded-below scale, so it is now bootstrapped and given a BCa
+  interval directly, with no post-hoc transform at all. `PRESS` is
+  computed from the same closed-form leave-one-out predictions as
+  before (no refitting), and the BCa acceleration constant again uses a
+  fast closed-form "delete-one" approximation rather than a full nested
+  double-jackknife. As before, predicted R-squared cannot exceed the
+  model's ordinary (in-sample) R-squared. The output structure
+  (`fit$boot$pred.r.squared$estimate`/`conf.int`/`p.value`) is
+  unchanged; only the values themselves and their computation differ.
+
 # merya 0.7.6
 
 * **Bug fix: `boot.glm(..., effect = "PAF")` now works without a `data`

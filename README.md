@@ -133,16 +133,19 @@ boot.ci(t.test(rnorm(30, 1)))  # works for t.test()/cor.test() output too
    jackknife) leave-one-out formulas, avoiding full refits.
 4. Build the BCa confidence interval from the bootstrap distribution.
    For quantities that are *squares* of a signed statistic
-   (`boot.lm()`'s `"partial.eta2"`/`"eta2"`/`pred.r.squared`), the
-   interval is first built on the signed (non-squared) statistic and
-   then converted to the squared scale by taking the smallest/largest
-   absolute value attained within that signed interval as the new
-   lower/upper bound before squaring — not by naively squaring the
-   signed endpoints, which would misrepresent an interval that
-   straddles zero. For `boot.glm()`'s `"OR"` and the conditional form of
-   `"RR"`, the *same* coefficient-scale BCa interval used for `"coef"`
-   is instead just exponentiated (valid because exponentiation is
-   monotonic, so it commutes with taking quantiles).
+   (`boot.lm()`'s `"partial.eta2"`/`"eta2"`), the interval is first built
+   on the signed (non-squared) statistic and then converted to the
+   squared scale by taking the smallest/largest absolute value attained
+   within that signed interval as the new lower/upper bound before
+   squaring — not by naively squaring the signed endpoints, which would
+   misrepresent an interval that straddles zero. `pred.r.squared` is
+   *not* treated this way: it's the textbook `1 - PRESS/TSS`, already on
+   its natural signed scale (a model worse than the mean legitimately
+   scores negative), so its BCa interval is built directly on that
+   statistic with no transform. For `boot.glm()`'s `"OR"` and the
+   conditional form of `"RR"`, the *same* coefficient-scale BCa interval
+   used for `"coef"` is instead just exponentiated (valid because
+   exponentiation is monotonic, so it commutes with taking quantiles).
 5. Obtain the p-value by **analytically inverting** the BCa
    transformation at the natural null value for the scale in question
    (0 for most statistics; 1 for a risk/odds ratio), rather than

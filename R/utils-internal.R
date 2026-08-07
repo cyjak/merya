@@ -473,7 +473,11 @@
     if (stat_kind == "eta2") {
       tss_b <- if (has_icpt) sum((yb - mean(yb))^2) else sum(yb^2)
       r2_b <- if (tss_b > 0) 1 - rss_b / tss_b else NA_real_
-      out[b, ] <- pr_b * sqrt(pmax(1 - r2_b, 0))
+      # sr_i = t_i * sqrt((1-R^2)/df_resid) -- NOT pr_i * sqrt(1-R^2);
+      # sr_i^2 = R2_full - R2_reduced follows from F = t_i^2 for a
+      # single-df drop, and pr_i*sqrt(1-R2) only coincides with this
+      # in the trivial limit t_i -> 0.
+      out[b, ] <- t_b * sqrt(pmax(1 - r2_b, 0) / df_resid)
     } else {
       out[b, ] <- pr_b
     }
@@ -527,7 +531,10 @@
       Syy - y^2
     }
     r2_loo <- pmin(pmax(1 - rss_loo / tss_loo, 0), 1)  # length n
-    pr_loo * sqrt(1 - r2_loo)                          # n x p (row-recycled)
+    # sr_i = t_i * sqrt((1-R^2)/df) -- NOT pr_i * sqrt(1-R^2); see
+    # .boot_lm_effect() for the derivation (F = t_i^2 for a single-df
+    # drop).
+    t_loo * sqrt(pmax(1 - r2_loo, 0) / df_loo)         # n x p (row-recycled)
   } else {
     pr_loo
   }

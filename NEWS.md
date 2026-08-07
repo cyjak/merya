@@ -1,3 +1,32 @@
+# merya 0.8.1
+
+* **Bug fix: `boot.lm(..., effect = "eta2")` (and, downstream, its BCa
+  confidence interval and p-value) used an incorrect formula for the
+  semi-partial ("part") correlation.** It computed `sr <- pr *
+  sqrt(1 - R2)` (partial correlation rescaled by `sqrt(1 - R^2)`); the
+  correct closed-form expression (Cohen & Cohen, *Applied Multiple
+  Regression/Correlation Analysis*), derivable from the general-linear-
+  model identity `F = t^2` for dropping a single predictor, is
+  `sr <- t * sqrt((1 - R2) / df_resid)`. The two formulas coincide only
+  in the trivial `t -> 0` limit and diverge increasingly as the effect
+  gets stronger, so `eta2` (and its confidence interval) was previously
+  understated for anything beyond a weak effect. The clearest symptom:
+  with a single predictor, there is nothing left to partial out, so
+  `sr` must equal `pr` exactly -- the old formula did not satisfy this
+  (`pr * sqrt(1-R2) != pr` unless `R2 = 0`); the corrected one does, by
+  construction. Fixed in all three places this quantity is computed:
+  the per-replicate bootstrap loop, the closed-form leave-one-out
+  jackknife used for the BCa acceleration constant, and the full-sample
+  point estimate; `"partial.cor"`/`"partial.eta2"` (which do not
+  involve this formula) are unaffected. Two correctness checks were
+  added to the test suite: the single-predictor `sr == pr` identity
+  above (which the bug failed and the fix satisfies, exactly, across
+  the entire bootstrap distribution, not just the point estimate), and
+  a direct ground-truth check with two correlated predictors comparing
+  the reported semi-partial correlation squared against
+  `R2_full - R2_reduced` computed by actually refitting the model
+  without that predictor.
+
 # merya 0.8.0
 
 * **`boot.lm()`'s `pred.r.squared` now uses the textbook "predicted

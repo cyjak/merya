@@ -62,12 +62,19 @@
 #'   \code{sign(t_j) * sqrt(t_j^2 / (t_j^2 + df))} where \code{t_j} is
 #'   that predictor's t-statistic and \code{df} the residual degrees of
 #'   freedom (both from the replicate's own refit); the semi-partial
-#'   ("part") correlation additionally rescales by
-#'   \code{sqrt(1 - R^2)} of that same refit. Both come directly from
-#'   quantities already produced by the same per-replicate Cholesky
-#'   solve used for \code{"coef"} (no separate reduced-model refits are
-#'   needed), and their jackknife (for the BCa acceleration constant) is
-#'   likewise closed-form, extending the same leave-one-out identities
+#'   ("part") correlation is instead \code{t_j * sqrt((1 - R^2) / df)}
+#'   of that same refit. This is equivalent to \code{sign(t_j) *
+#'   sqrt(R^2_full - R^2_reduced)} -- the (signed) square root of the
+#'   unique drop in R-squared from omitting predictor \eqn{j} -- via the
+#'   general-linear-model identity \eqn{F = t_j^2} for dropping a single
+#'   predictor; it is \emph{not} the partial correlation itself further
+#'   rescaled by \code{sqrt(1 - R^2)}, which only coincides with the
+#'   correct value in the trivial \code{t_j -> 0} limit and otherwise
+#'   understates the effect. Both come directly from quantities already
+#'   produced by the same per-replicate Cholesky solve used for
+#'   \code{"coef"} (no separate reduced-model refits are needed), and
+#'   their jackknife (for the BCa acceleration constant) is likewise
+#'   closed-form, extending the same leave-one-out identities
 #'   used for \code{"coef"} (leave-one-out RSS via the PRESS identity,
 #'   leave-one-out \eqn{(X'X)^{-1}} via a rank-one/Sherman-Morrison
 #'   update, and a closed-form leave-one-out total sum of squares) --
@@ -215,7 +222,9 @@ boot.lm <- function(formula, data, subset, weights, na.action, offset,
     df_resid <- fit$df.residual
     pr_hat_all <- sign(tvals) * sqrt(tvals^2 / (tvals^2 + df_resid))
     r2_hat <- sfit$r.squared
-    sr_hat_all <- pr_hat_all * sqrt(max(1 - r2_hat, 0))
+    # sr_i = t_i * sqrt((1-R^2)/df_resid) -- NOT pr_i * sqrt(1-R^2); see
+    # .boot_lm_effect() for the derivation (F = t_i^2 for a single-df drop).
+    sr_hat_all <- tvals * sqrt(pmax(1 - r2_hat, 0) / df_resid)
 
     stat_kind <- if (effect == "eta2") "eta2" else "pcor"
     theta_hat_all <- if (stat_kind == "eta2") sr_hat_all else pr_hat_all

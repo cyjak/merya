@@ -141,6 +141,47 @@ fit_default_a <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300)
 fit_default_b <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300, effect = "coef")
 stopifnot(isTRUE(all.equal(fit_default_a$boot$conf.int, fit_default_b$boot$conf.int)))
 
+## ---- semi-partial correlation ("eta2") correctness checks ---------------
+## Verification 1: with a single predictor, there is nothing left to
+## partial out, so the semi-partial ("part") correlation must equal the
+## partial correlation exactly -- both the point estimate and, since both
+## fits share the same default seed and hence the same underlying
+## resamples, the full bootstrap distribution and CI. This is the
+## sanity check that originally exposed sr <- pr * sqrt(1 - R2) as wrong
+## (it is only correct in the trivial R2 = 0 limit); the correct closed
+## form is sr <- t * sqrt((1 - R2) / df_resid).
+uni_pcor <- merya::boot.lm(mpg ~ wt, data = mtcars, R = 500, effect = "partial.cor")
+uni_eta2 <- merya::boot.lm(mpg ~ wt, data = mtcars, R = 500, effect = "eta2")
+stopifnot(isTRUE(all.equal(unname(uni_pcor$boot$estimate), unname(uni_eta2$boot$estimate))))
+stopifnot(isTRUE(all.equal(uni_pcor$boot$coefficients, uni_eta2$boot$coefficients)))
+
+## Verification 2: with >= 2 (correlated) predictors, the semi-partial
+## correlation squared for predictor j must equal the *directly*
+## computed drop in R-squared from omitting j, R2_full - R2_reduced.
+## The eta2 point estimate is itself a closed-form calculation (only its
+## CI/p-value come from the bootstrap), so this should match to full
+## numerical precision, not just approximately.
+set.seed(80)
+n_gt <- 200
+x1_gt <- rnorm(n_gt)
+x2_gt <- 0.4 * x1_gt + rnorm(n_gt, sd = 0.9)  # correlated predictors
+y_gt <- 1 + 0.6 * x1_gt + 0.3 * x2_gt + rnorm(n_gt)
+d_gt <- data.frame(y = y_gt, x1 = x1_gt, x2 = x2_gt)
+
+full_gt <- lm(y ~ x1 + x2, data = d_gt)
+R2_full_gt <- summary(full_gt)$r.squared
+true_sr2_x1 <- R2_full_gt - summary(lm(y ~ x2, data = d_gt))$r.squared
+true_sr2_x2 <- R2_full_gt - summary(lm(y ~ x1, data = d_gt))$r.squared
+
+fit_eta2_gt <- merya::boot.lm(y ~ x1 + x2, data = d_gt, R = 500, effect = "eta2")
+stopifnot(isTRUE(all.equal(unname(fit_eta2_gt$boot$estimate["x1"]), true_sr2_x1)))
+stopifnot(isTRUE(all.equal(unname(fit_eta2_gt$boot$estimate["x2"]), true_sr2_x2)))
+## sanity: both true drops must be strictly positive here (real signal,
+## not a degenerate case where this check would pass vacuously)
+stopifnot(true_sr2_x1 > 0, true_sr2_x2 > 0)
+
+cat("boot.lm semi-partial correlation correctness checks passed.\n")
+
 cat("boot.lm effect-size tests passed.\n")
 
 ## ---- boot.lm: pred.r.squared ---------------------------------------------

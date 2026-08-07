@@ -77,8 +77,15 @@ for the jackknife step.
 \code{sign(t_j) * sqrt(t_j^2 / (t_j^2 + df))} where \code{t_j} is that
 predictor's t-statistic and \code{df} the residual degrees of freedom
 (both from the replicate's own refit); the semi-partial ("part")
-correlation additionally rescales by \code{sqrt(1 - R^2)} of that same
-refit. Because partial eta-squared and eta-squared are squares of a
+correlation is instead \code{t_j * sqrt((1 - R^2) / df)} of that same
+refit. This is equivalent to \code{sign(t_j) * sqrt(R^2_full -
+R^2_reduced)} -- the (signed) square root of the unique drop in
+R-squared from omitting predictor \eqn{j} -- via the general-linear-model
+identity \eqn{F = t_j^2} for dropping a single predictor; it is
+\emph{not} the partial correlation itself further rescaled by
+\code{sqrt(1 - R^2)}, which only coincides with the correct value in the
+trivial \code{t_j -> 0} limit and otherwise understates the effect.
+Because partial eta-squared and eta-squared are squares of a
 statistic that can be negative, their confidence intervals are built by
 first computing the BCa interval on the signed (partial/semi-partial
 correlation) scale, then converting to the squared scale by taking the

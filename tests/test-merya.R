@@ -144,16 +144,24 @@ stopifnot(isTRUE(all.equal(fit_default_a$boot$conf.int, fit_default_b$boot$conf.
 ## ---- semi-partial correlation ("eta2") correctness checks ---------------
 ## Verification 1: with a single predictor, there is nothing left to
 ## partial out, so the semi-partial ("part") correlation must equal the
-## partial correlation exactly -- both the point estimate and, since both
-## fits share the same default seed and hence the same underlying
-## resamples, the full bootstrap distribution and CI. This is the
-## sanity check that originally exposed sr <- pr * sqrt(1 - R2) as wrong
-## (it is only correct in the trivial R2 = 0 limit); the correct closed
-## form is sr <- t * sqrt((1 - R2) / df_resid).
+## partial correlation exactly -- at the raw statistic level (every
+## bootstrap replicate) and, since "eta2" reports the *square* of that
+## statistic (eta2 = sr^2, mirroring how "partial.eta2" reports pr^2;
+## see fit$boot$estimate vs. fit$boot$coefficients below), also once
+## that squaring is accounted for. This is the sanity check that
+## originally exposed sr <- pr * sqrt(1 - R2) as wrong (it is only
+## correct in the trivial R2 = 0 limit); the correct closed form is
+## sr <- t * sqrt((1 - R2) / df_resid).
 uni_pcor <- merya::boot.lm(mpg ~ wt, data = mtcars, R = 500, effect = "partial.cor")
 uni_eta2 <- merya::boot.lm(mpg ~ wt, data = mtcars, R = 500, effect = "eta2")
-stopifnot(isTRUE(all.equal(unname(uni_pcor$boot$estimate), unname(uni_eta2$boot$estimate))))
+## $boot$coefficients holds each function's raw (unsquared) per-replicate
+## statistic -- pr_b for "partial.cor", sr_b for "eta2" -- so these must
+## be identical replicate-for-replicate when there's only one predictor
 stopifnot(isTRUE(all.equal(uni_pcor$boot$coefficients, uni_eta2$boot$coefficients)))
+## $boot$estimate holds the *reported* quantity, which for "eta2" is the
+## square of the point estimate (eta2 = sr_hat^2), so the comparison here
+## must square the "partial.cor" side to match
+stopifnot(isTRUE(all.equal(unname(uni_pcor$boot$estimate)^2, unname(uni_eta2$boot$estimate))))
 
 ## Verification 2: with >= 2 (correlated) predictors, the semi-partial
 ## correlation squared for predictor j must equal the *directly*

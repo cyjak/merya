@@ -1,3 +1,21 @@
+# merya 0.8.2
+
+* **Test-suite fix (no change to package behavior):** the
+  single-predictor `sr == pr` regression test added in 0.8.1 to verify
+  the semi-partial correlation fix compared `fit$boot$estimate` between
+  an `effect = "partial.cor"` fit and an `effect = "eta2"` fit directly.
+  That's not an apples-to-apples comparison: `fit$boot$estimate` holds
+  the *reported* quantity, which for `"eta2"` is already squared
+  (`eta2 = sr^2`, mirroring how `"partial.eta2"` reports `pr^2`), while
+  `"partial.cor"` reports the raw, unsquared statistic -- so the test
+  was comparing `pr` against `sr^2` and failing even though the
+  underlying fix is correct (`sr == pr` exactly, verified independently
+  via `fit$boot$coefficients`, which holds each side's *raw*,
+  pre-squaring per-replicate values and does not have this mismatch).
+  The test now squares the `"partial.cor"` side before comparing,
+  matching the same convention already used by the pre-existing
+  `"partial.eta2" == "partial.cor"^2` test just above it in the suite.
+
 # merya 0.8.1
 
 * **Bug fix: `boot.lm(..., effect = "eta2")` (and, downstream, its BCa

@@ -1,3 +1,85 @@
+# merya 0.9.0
+
+* **Wild bootstrap, now the default resampling method for `boot.lm()`,
+  `boot.glm()`, and `boot.t.test()`**, via a new `boot.method` argument
+  (`"wild"` or `"case"`). The wild bootstrap keeps the design matrix
+  fixed across every replicate and perturbs each observation's own
+  residual by an independent random multiplier (mean 0, variance 1)
+  instead of resampling rows -- the standard approach for
+  heteroskedasticity-robust bootstrap inference. Because the design
+  matrix (for `boot.glm()`, the IRLS-weighted design at convergence)
+  never changes across replicates, the entire `R`-replicate bootstrap
+  for every quantity these functions support reduces to a handful of
+  full-matrix operations (one `crossprod()`, one `backsolve()` handling
+  all replicates' right-hand sides at once) with **no explicit loop
+  over replicates at all**, which is what makes `"wild"` both the new
+  default and, in most cases, faster than the classical
+  resample-the-rows-with-replacement bootstrap, which remains available
+  as `boot.method = "case"` and is unchanged in its own methodology.
+  - `boot.lm()`: every effect option (`"coef"`, `"partial.cor"`,
+    `"partial.eta2"`, `"eta2"`) and `pred.r.squared` are supported under
+    wild bootstrap, derived from one shared set of wild-bootstrap draws
+    per call. The leave-one-out predictions needed for
+    `pred.r.squared` reuse the closed-form OLS identity
+    `yhat_(-i) = yhat_i - h_i*e_i/(1-h_i)` directly, with no
+    per-replicate leave-one-out coefficient matrix needed.
+  - `boot.glm()`: since a response-scale wild bootstrap cannot generally
+    be defined for non-Gaussian families (e.g. a perturbed 0/1 response
+    for `binomial()` would fall outside `{0,1}`), the wild bootstrap
+    here perturbs the residual of the IRLS *working response* at
+    convergence and solves **one** weighted-least-squares step per
+    replicate using the converged IRLS weights -- a linearization
+    around the full-data fit, well-defined for any family/link. All
+    `effect` options (`"coef"`, `"OR"`, `"RR"`, `"RD"`, `"PAF"`) are
+    supported; the g-computation effects (`"RR"`/`"RD"` with
+    `exposure`, and `"PAF"`) standardize over the fixed, full covariate
+    distribution using each replicate's own linearized coefficients,
+    fully vectorized. For `"PAF"` specifically, the observed prevalence
+    (which has no wild-bootstrap analogue, since only residuals are
+    perturbed) is held fixed at the full-sample value for every
+    replicate; only the model-based counterfactual prevalence varies.
+  - The BCa acceleration constant's jackknife is unchanged and shared
+    between both `boot.method`s in every function, since its role
+    (estimating the curvature of the sampling distribution from each
+    observation's influence) does not depend on how the main bootstrap
+    distribution is generated.
+  - `wild.dist` selects the multiplier distribution: `"rademacher"`
+    (default; \eqn{v=\pm1} with equal probability, the simplest and
+    most commonly recommended choice), `"mammen"` (a skewed two-point
+    distribution matching the third moment), or `"normal"`
+    (\eqn{v \sim N(0,1)}).
+* **`ci.type` argument (`"bca"`, the previous and still-default
+  behavior, or `"percentile"`) added to every bootstrap-based function**
+  (`boot.t.test()`, `boot.cor.test()`, `boot.lm()`, `boot.glm()`),
+  applying uniformly regardless of `boot.method`. `"percentile"` uses
+  the plain empirical `[alpha/2, 1-alpha/2]` quantiles of the bootstrap
+  distribution (no bias-correction or acceleration adjustment), with a
+  correspondingly simpler CI-inversion p-value (the smallest two-sided
+  alpha at which the null value would just sit on the interval's
+  boundary).
+* **`boot.t.test()` is reformulated internally as a regression**, and
+  now agrees *exactly* (not just approximately) with `boot.lm()` on the
+  same data: a one-sample test is an intercept-only regression on `x`
+  (paired: on the differences `x - y`), and a two-sample test is a
+  regression of the combined sample on a 0/1 group indicator, testing
+  that indicator's coefficient (algebraically identical to the
+  difference in means). Both cases are handed directly to `boot.lm()`'s
+  own internal engines (the same bootstrap/wild-bootstrap coefficient
+  routines and the same closed-form jackknife), so
+  `boot.t.test(x, y)` and `boot.lm(c(x, y) ~ group)`'s group
+  coefficient are numerically identical given the same
+  `boot.method`/`wild.dist`/`ci.type`/`seed`. **This is a deliberate
+  methodology change, not just an internal refactor**: the two-sample
+  case's resampling is now unstratified (the *combined* sample is
+  resampled/perturbed together, exactly as `boot.lm()`'s case-resampling
+  bootstrap already did), rather than resampling each group separately
+  at its own fixed size as previous versions did; this is what makes
+  the exact `boot.lm()` agreement possible, and is also the only
+  sensible option for the wild bootstrap, which has no natural
+  "resample within group" analogue since it never resamples rows.
+  `var.equal` remains an ignored, interface-compatibility-only argument,
+  as before.
+
 # merya 0.8.2
 
 * **Test-suite fix (no change to package behavior):** the

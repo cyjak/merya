@@ -56,10 +56,13 @@
 #'     automatic recovery from \code{data.name}), \code{R} (default
 #'     \code{10000}), \code{conf.level} (default: the original test's
 #'     level if recoverable, else \code{0.95}), \code{seed} (default
-#'     \code{123}).}
+#'     \code{123}); further named arguments (e.g. \code{boot.method},
+#'     \code{wild.dist}, \code{ci.type}, \code{paired}) are forwarded to
+#'     \code{\link{boot.t.test}}/\code{\link{boot.cor.test}}.}
 #'   \item{\code{lm}, \code{glm}}{\code{R} (default \code{10000}),
 #'     \code{conf.level} (default \code{0.95}), \code{seed} (default
-#'     \code{123}); further named arguments (e.g. \code{irls.maxit},
+#'     \code{123}); further named arguments (e.g. \code{boot.method},
+#'     \code{wild.dist}, \code{ci.type}, \code{irls.maxit},
 #'     \code{irls.tol}, \code{effect}, \code{exposure} for \code{glm})
 #'     are forwarded to \code{\link{boot.lm}}/\code{\link{boot.glm}}.}
 #' }
@@ -164,7 +167,7 @@ boot.ci.htest <- function(object, x, y, R = 10000L, conf.level = NULL,
     mu <- if (is.null(mu)) 0 else as.numeric(mu)
     boot.t.test(x, y = if (have_y) y else NULL,
                 alternative = object$alternative, mu = mu, paired = paired,
-                conf.level = conf.level, R = R, seed = seed)
+                conf.level = conf.level, R = R, seed = seed, ...)
   } else {
     if (!have_y) {
       stop("boot.ci() could not recover the second variable for this ",
@@ -174,7 +177,7 @@ boot.ci.htest <- function(object, x, y, R = 10000L, conf.level = NULL,
     cmethod <- if (grepl("Kendall", meth)) "kendall" else
       if (grepl("Spearman", meth)) "spearman" else "pearson"
     boot.cor.test(x, y, method = cmethod, alternative = object$alternative,
-                   conf.level = conf.level, R = R, seed = seed)
+                   conf.level = conf.level, R = R, seed = seed, ...)
   }
 }
 

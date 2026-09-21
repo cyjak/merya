@@ -53,6 +53,86 @@ stopifnot(isTRUE(all.equal(r_d1$conf.int, r_d2$conf.int)))
 
 cat("boot.t.test / seed tests passed.\n")
 
+## ---- boot.t.test: boot.method / wild.dist / ci.type -----------------
+## default boot.method is now "wild" (Rademacher, BCa)
+r_wild <- merya::boot.t.test(x, y, R = 300)
+stopifnot(identical(r_wild$boot.method, "wild"))
+stopifnot(identical(r_wild$wild.dist, "rademacher"))
+stopifnot(identical(r_wild$ci.type, "bca"))
+
+r_case <- merya::boot.t.test(x, y, R = 300, boot.method = "case")
+stopifnot(identical(r_case$boot.method, "case"))
+stopifnot(is.null(r_case$wild.dist))
+
+## every wild.dist option must run and give a valid p-value
+for (wd in c("rademacher", "mammen", "normal")) {
+  rw <- merya::boot.t.test(x, y, R = 200, wild.dist = wd)
+  stopifnot(identical(rw$wild.dist, wd))
+  stopifnot(is.finite(rw$p.value), rw$p.value >= 0, rw$p.value <= 1)
+}
+
+## ci.type = "percentile" must be reflected in both the returned object
+## and the printed method label
+r_pct <- merya::boot.t.test(x, y, R = 300, ci.type = "percentile")
+stopifnot(identical(r_pct$ci.type, "percentile"))
+stopifnot(grepl("percentile", r_pct$method))
+stopifnot(!grepl("BCa", r_pct$method))
+
+cat("boot.t.test boot.method/wild.dist/ci.type tests passed.\n")
+
+## ---- boot.t.test() must agree EXACTLY with boot.lm() on the same data ----
+## (boot.t.test() is internally just boot.lm()'s own engines applied to an
+## equivalent regression, so this should hold to full numerical precision
+## for every boot.method/ci.type combination, not merely approximately)
+
+## two-sample: group = 1 for x-rows, 0 for y-rows, so the "group"
+## coefficient in z ~ group equals mean(x) - mean(y), matching
+## boot.t.test(x, y)'s estimate/CI/p-value construction exactly
+d_consist <- data.frame(z = c(x, y),
+                         group = c(rep(1, length(x)), rep(0, length(y))))
+for (bm in c("wild", "case")) {
+  for (ct in c("bca", "percentile")) {
+    tt <- merya::boot.t.test(x, y, R = 400, boot.method = bm, ci.type = ct)
+    lmfit <- merya::boot.lm(z ~ group, data = d_consist, R = 400,
+                             boot.method = bm, ci.type = ct)
+    stopifnot(isTRUE(all.equal(unname(tt$estimate[1] - tt$estimate[2]),
+                                unname(stats::coef(lmfit)["group"]))))
+    stopifnot(isTRUE(all.equal(as.numeric(tt$conf.int),
+                                unname(lmfit$boot$conf.int["group", ]))))
+    stopifnot(isTRUE(all.equal(unname(tt$p.value),
+                                unname(lmfit$boot$p.value["group"]))))
+  }
+}
+cat("boot.t.test <-> boot.lm (two-sample) consistency tests passed.\n")
+
+## one-sample: boot.t.test(x) must match boot.lm(x ~ 1)'s intercept
+for (bm in c("wild", "case")) {
+  tt1 <- merya::boot.t.test(x, R = 400, boot.method = bm)
+  lmfit1 <- merya::boot.lm(x ~ 1, R = 400, boot.method = bm)
+  stopifnot(isTRUE(all.equal(unname(tt1$estimate),
+                              unname(stats::coef(lmfit1)["(Intercept)"]))))
+  stopifnot(isTRUE(all.equal(as.numeric(tt1$conf.int),
+                              unname(lmfit1$boot$conf.int["(Intercept)", ]))))
+  stopifnot(isTRUE(all.equal(unname(tt1$p.value),
+                              unname(lmfit1$boot$p.value["(Intercept)"]))))
+}
+cat("boot.t.test <-> boot.lm (one-sample) consistency tests passed.\n")
+
+## paired: boot.t.test(x, y, paired = TRUE) must match boot.lm(d ~ 1)'s
+## intercept, where d = x - y (per the paired-as-one-sample-on-the-
+## differences reformulation)
+xp <- x; yp <- x + rnorm(length(x), sd = 0.4)  # genuinely paired-like data
+d_paired <- xp - yp
+for (bm in c("wild", "case")) {
+  ttp <- merya::boot.t.test(xp, yp, paired = TRUE, R = 400, boot.method = bm)
+  lmfitp <- merya::boot.lm(d_paired ~ 1, R = 400, boot.method = bm)
+  stopifnot(isTRUE(all.equal(unname(ttp$estimate),
+                              unname(stats::coef(lmfitp)["(Intercept)"]))))
+  stopifnot(isTRUE(all.equal(as.numeric(ttp$conf.int),
+                              unname(lmfitp$boot$conf.int["(Intercept)", ]))))
+}
+cat("boot.t.test <-> boot.lm (paired) consistency tests passed.\n")
+
 ## ---- boot.cor.test ---------------------------------------------------
 n <- 60
 a <- rnorm(n)
@@ -79,6 +159,15 @@ stopifnot(rc4$p.value > 0.01)
 rc5a <- merya::boot.cor.test(a, b, R = 300)
 rc5b <- merya::boot.cor.test(a, b, R = 300)
 stopifnot(isTRUE(all.equal(rc5a$conf.int, rc5b$conf.int)))
+
+## ci.type = "percentile"
+rc6 <- merya::boot.cor.test(a, b, R = 300, ci.type = "percentile")
+stopifnot(identical(rc6$ci.type, "percentile"))
+stopifnot(grepl("percentile", rc6$method))
+stopifnot(!grepl("BCa", rc6$method))
+stopifnot(is.finite(rc6$p.value), rc6$p.value >= 0, rc6$p.value <= 1)
+
+cat("boot.cor.test ci.type tests passed.\n")
 
 ## ---- boot.lm ----------------------------------------------------------
 fit <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300)
@@ -192,6 +281,52 @@ cat("boot.lm semi-partial correlation correctness checks passed.\n")
 
 cat("boot.lm effect-size tests passed.\n")
 
+## ---- boot.lm: boot.method / wild.dist / ci.type ---------------------
+fit_wild <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300)
+stopifnot(identical(fit_wild$boot$boot.method, "wild"))
+stopifnot(identical(fit_wild$boot$wild.dist, "rademacher"))
+stopifnot(identical(fit_wild$boot$ci.type, "bca"))
+
+fit_case <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300,
+                            boot.method = "case")
+stopifnot(identical(fit_case$boot$boot.method, "case"))
+stopifnot(is.null(fit_case$boot$wild.dist))
+stopifnot(all(fit_case$boot$conf.int[, "lower"] <= fit_case$boot$conf.int[, "upper"]))
+
+for (wd in c("rademacher", "mammen", "normal")) {
+  fw <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 200, wild.dist = wd)
+  stopifnot(identical(fw$boot$wild.dist, wd))
+  stopifnot(all(is.finite(fw$boot$p.value)))
+}
+
+fit_pct <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300,
+                           ci.type = "percentile")
+stopifnot(identical(fit_pct$boot$ci.type, "percentile"))
+printed_pct <- capture.output(print(fit_pct))
+stopifnot(any(grepl("percentile", printed_pct)))
+stopifnot(!any(grepl("BCa", printed_pct)))
+
+## wild vs case should give the same point estimate (deterministic,
+## doesn't depend on resampling method) and a similarly-shaped CI for a
+## reasonably well-behaved model/sample size
+stopifnot(isTRUE(all.equal(unname(stats::coef(fit_wild)),
+                            unname(stats::coef(fit_case)))))
+stopifnot(all(fit_wild$boot$conf.int[, "lower"] <= fit_wild$boot$conf.int[, "upper"]))
+stopifnot(all(fit_case$boot$conf.int[, "lower"] <= fit_case$boot$conf.int[, "upper"]))
+
+## effect sizes + pred.r.squared must also work under wild bootstrap
+## (already the default in the tests above, but check explicitly with
+## every effect option and boot.method = "case" too, for completeness)
+for (bm in c("wild", "case")) {
+  fe <- merya::boot.lm(mpg ~ wt + hp, data = mtcars, R = 300,
+                        effect = "eta2", pred.r.squared = TRUE, boot.method = bm)
+  stopifnot(identical(fe$boot$boot.method, bm))
+  stopifnot(!is.null(fe$boot$pred.r.squared))
+  stopifnot(all(fe$boot$estimate >= 0))
+}
+
+cat("boot.lm boot.method/wild.dist/ci.type tests passed.\n")
+
 ## ---- boot.lm: pred.r.squared ---------------------------------------------
 ## Textbook definition: 1 - PRESS/TSS. Unlike partial.eta2/eta2, this is
 ## NOT bounded below by 0 -- a model that predicts worse than the mean
@@ -262,6 +397,49 @@ stopifnot(all(gfit$boot$conf.int[, "lower"] <= gfit$boot$conf.int[, "upper"]))
 gfit_r1 <- merya::boot.glm(am ~ wt + hp, data = mtcars, family = binomial(), R = 300)
 gfit_r2 <- merya::boot.glm(am ~ wt + hp, data = mtcars, family = binomial(), R = 300)
 stopifnot(isTRUE(all.equal(gfit_r1$boot$conf.int, gfit_r2$boot$conf.int)))
+
+## ---- boot.glm: boot.method / wild.dist / ci.type ---------------------
+stopifnot(identical(gfit$boot$boot.method, "wild"))
+stopifnot(identical(gfit$boot$wild.dist, "rademacher"))
+stopifnot(identical(gfit$boot$ci.type, "bca"))
+
+gfit_case <- merya::boot.glm(am ~ wt + hp, data = mtcars, family = binomial(),
+                              R = 300, boot.method = "case")
+stopifnot(identical(gfit_case$boot$boot.method, "case"))
+stopifnot(is.null(gfit_case$boot$wild.dist))
+stopifnot(all(gfit_case$boot$conf.int[, "lower"] <= gfit_case$boot$conf.int[, "upper"]))
+## same point estimate regardless of resampling method
+stopifnot(isTRUE(all.equal(unname(stats::coef(gfit)), unname(stats::coef(gfit_case)))))
+
+for (wd in c("rademacher", "mammen", "normal")) {
+  gw <- merya::boot.glm(am ~ wt + hp, data = mtcars, family = binomial(),
+                         R = 200, wild.dist = wd)
+  stopifnot(identical(gw$boot$wild.dist, wd))
+  stopifnot(all(is.finite(gw$boot$p.value)))
+}
+
+gfit_pct <- merya::boot.glm(am ~ wt + hp, data = mtcars, family = binomial(),
+                             R = 300, ci.type = "percentile")
+stopifnot(identical(gfit_pct$boot$ci.type, "percentile"))
+printed_gpct <- capture.output(print(gfit_pct))
+stopifnot(any(grepl("percentile", printed_gpct)))
+stopifnot(!any(grepl("BCa", printed_gpct)))
+
+## wild bootstrap must also work for every effect option, including
+## g-computation (RR/RD/PAF)
+d_wild_gc <- mtcars
+d_wild_gc$vs <- factor(d_wild_gc$vs)
+for (eff in c("OR", "RR", "RD", "PAF")) {
+  args <- list(formula = am ~ vs + wt, data = d_wild_gc, family = binomial(),
+               R = 200, effect = eff, boot.method = "wild")
+  if (eff %in% c("RD")) args$exposure <- "vs"
+  if (eff == "RR") args$exposure <- "vs"  # marginal RR via g-computation
+  gw_eff <- do.call(merya::boot.glm, args)
+  stopifnot(identical(gw_eff$boot$boot.method, "wild"))
+  stopifnot(all(is.finite(gw_eff$boot$p.value)))
+}
+
+cat("boot.glm boot.method/wild.dist/ci.type tests passed.\n")
 
 ## ---- boot.glm: effect = "OR" ---------------------------------------------
 or_fit <- merya::boot.glm(am ~ wt + hp, data = mtcars,

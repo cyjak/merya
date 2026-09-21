@@ -2,7 +2,7 @@ Package: merya
 Type: Package
 Title: Fast BCa Bootstrap Confidence Intervals and CI-Inversion P-Values
     for Common Statistical Tests and Models
-Version: 0.8.2
+Version: 0.9.0
 Authors@R: person(given = "Your", family = "Name",
     email = "you@example.com", role = c("aut", "cre"))
 Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
@@ -12,8 +12,17 @@ Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
     classical asymptotic results. Functions take the same arguments and
     return objects of the same classes ("htest", "lm", "glm") as their
     original counterparts, so existing code and downstream methods keep
-    working. boot.lm() can additionally report, for each predictor, its
-    partial correlation, partial eta-squared, or eta-squared (with BCa
+    working. boot.lm(), boot.glm(), and boot.t.test() default to a wild
+    bootstrap, which keeps the design matrix fixed and perturbs each
+    observation's own residual rather than resampling rows, with the
+    classical resample-the-rows-with-replacement bootstrap remaining
+    available as an option; every bootstrap-based function additionally
+    accepts a choice of BCa or plain percentile confidence intervals,
+    applied uniformly regardless of resampling method. boot.t.test() is
+    internally reformulated as a regression so that it agrees exactly
+    with boot.lm() for the same outcome and a binary predictor, given the
+    same settings. boot.lm() can additionally report, for each predictor,
+    its partial correlation, partial eta-squared, or eta-squared (with
     confidence intervals and CI-inversion p-values) instead of its slope
     coefficient, and optionally a bootstrapped, leave-one-out predicted
     R-squared for the model as a whole. boot.glm() can report odds
@@ -21,19 +30,21 @@ Description: Drop-in replacements for stats::t.test(), stats::cor.test(),
     risk differences, or the population attributable fraction, in place
     of its raw coefficients. A single generic, boot.ci(), also takes an
     object already produced by t.test(), cor.test(), lm(), or glm() and
-    returns it with the same BCa/CI-inversion inference substituted in,
-    using the exact same internal computation as the corresponding
-    boot.*() function. All bootstrap-based functions default to 10000
-    resamples and to a fixed seed of 123 for reproducibility (settable to
-    any other integer, or to NULL to use whatever random state is
-    currently active instead of reseeding). The bootstrap resampling,
-    BCa transform, and CI-inversion p-value machinery is implemented
-    entirely in base R (using only the 'stats' package that ships with
-    every R installation, with no other dependencies);
-    resampling is vectorized wherever a closed-form statistic allows it,
-    and the BCa transform is inverted analytically for p-values (no
-    bisection / root-finding), which keeps the bootstrap and p-value
-    calculations fast even for large numbers of replicates.
+    returns it with the same bootstrap inference substituted in, using
+    the exact same internal computation as the corresponding boot.*()
+    function. All bootstrap-based functions default to 10000 resamples
+    and to a fixed seed of 123 for reproducibility (settable to any other
+    integer, or to NULL to use whatever random state is currently active
+    instead of reseeding). The bootstrap resampling, BCa transform, and
+    CI-inversion p-value machinery is implemented entirely in base R
+    (using only the 'stats' package that ships with every R installation,
+    with no other dependencies); resampling is vectorized wherever a
+    closed-form statistic allows it -- the wild bootstrap in particular
+    needs no explicit loop over replicates at all, since the design
+    matrix is fixed across replicates -- and the BCa transform is
+    inverted analytically for p-values (no bisection / root-finding),
+    which keeps the bootstrap and p-value calculations fast even for
+    large numbers of replicates.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends: R (>= 3.5.0)

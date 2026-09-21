@@ -14,6 +14,53 @@
   matrix(sample.int(n, size = n * R, replace = TRUE), nrow = n, ncol = R)
 }
 
+#' Draw one (n x R) matrix of i.i.d. wild-bootstrap multipliers v_i, each
+#' with mean 0 and variance 1. Used by the wild-bootstrap engines for
+#' boot.lm()/boot.glm() (\code{.wild_lm_core}/\code{.wild_glm_core}):
+#' \code{y*_i = fitted_i + v_i * residual_i}. All three draws are single
+#' vectorized calls (no per-observation or per-replicate loop).
+#'
+#' \code{"rademacher"} (default): \eqn{v = \pm 1} with equal probability.
+#' The simplest and fastest option, and the most commonly recommended
+#' default in the wild-bootstrap literature (e.g. Davidson & Flachaire
+#' 2008) for most regression settings.
+#'
+#' \code{"mammen"}: the two-point distribution of Mammen (1993),
+#' \eqn{v = -(\sqrt5-1)/2} with probability \eqn{(\sqrt5+1)/(2\sqrt5)}
+#' and \eqn{v = (\sqrt5+1)/2} otherwise. Matches the third moment of the
+#' multiplier to that of an idealized bootstrap distribution, which can
+#' give better higher-order accuracy for skewed residual distributions,
+#' at a small extra computational cost over Rademacher.
+#'
+#' \code{"normal"}: \eqn{v \sim N(0, 1)}. The simplest continuous choice;
+#' sometimes considered less robust than Rademacher/Mammen in small
+#' samples, but occasionally preferred for its symmetry and familiarity.
+#'
+#' @param n number of observations
+#' @param R number of bootstrap replicates
+#' @param dist one of \code{"rademacher"} (default), \code{"mammen"}, or
+#'   \code{"normal"}
+#' @return an \code{n x R} numeric matrix of multipliers
+#' @keywords internal
+#' @noRd
+.wild_weights <- function(n, R, dist = c("rademacher", "mammen", "normal")) {
+  dist <- match.arg(dist)
+  switch(dist,
+    rademacher = matrix(sample(c(-1, 1), size = n * R, replace = TRUE),
+                         nrow = n, ncol = R),
+    mammen = {
+      a <- -(sqrt(5) - 1) / 2          # E[v] = 0, E[v^2] = 1, E[v^3] = 1
+      b <- (sqrt(5) + 1) / 2
+      p_a <- (sqrt(5) + 1) / (2 * sqrt(5))
+      u <- matrix(stats::runif(n * R), nrow = n, ncol = R)
+      out <- matrix(b, nrow = n, ncol = R)
+      out[u < p_a] <- a
+      out
+    },
+    normal = matrix(stats::rnorm(n * R), nrow = n, ncol = R)
+  )
+}
+
 #' Normal quantile helper (avoids repeated qnorm() dispatch overhead)
 #' @keywords internal
 #' @noRd
@@ -107,6 +154,72 @@
               two.sided = 2 * min(alpha_one_sided, 1 - alpha_one_sided),
               less      = 1 - alpha_one_sided,
               greater   = alpha_one_sided,
+              stop("invalid 'alternative'"))
+  min(max(p, 0), 1)
+}
+
+#' Plain percentile confidence interval: the empirical
+#' \eqn{[\alpha/2, 1-\alpha/2]} quantiles of the bootstrap distribution,
+#' with no bias-correction or acceleration adjustment. Kept as a
+#' drop-in, call-compatible alternative to \code{.bca_ci} (same
+#' arguments, including the otherwise-unused \code{theta_hat}/
+#' \code{theta_loo}, and the same \code{"a"} attribute convention, set
+#' here to 0) so that every caller throughout the package can select
+#' between \code{ci.type = "bca"}/\code{"percentile"} by choosing which
+#' of \code{.bca_ci}/\code{.percentile_ci} to call, with no other code
+#' changes needed downstream.
+#'
+#' @param theta_boot numeric vector of bootstrap replicate values
+#' @param theta_hat unused; present only for interface parity with
+#'   \code{.bca_ci}
+#' @param theta_loo unused; present only for interface parity with
+#'   \code{.bca_ci}
+#' @param conf.level confidence level
+#' @return a length-2 numeric vector \code{c(lower, upper)} with
+#'   attributes \code{"z0"} and \code{"a"} both set to 0 (unused by the
+#'   percentile method, present only so downstream code that reads
+#'   \code{attr(ci, "a")} -- e.g. to feed \code{.percentile_pvalue} --
+#'   keeps working unchanged regardless of \code{ci.type})
+#' @keywords internal
+#' @noRd
+.percentile_ci <- function(theta_boot, theta_hat = NULL, theta_loo = NULL,
+                            conf.level = 0.95) {
+  alpha <- (1 - conf.level) / 2
+  ci <- stats::quantile(theta_boot, probs = c(alpha, 1 - alpha),
+                         type = 7, names = FALSE)
+  out <- as.numeric(ci)
+  attr(out, "z0") <- 0
+  attr(out, "a")  <- 0
+  out
+}
+
+#' CI-inversion p-value for the plain percentile method: the smallest
+#' two-sided alpha level at which \code{theta0} would just sit on the
+#' boundary of the \code{[alpha/2, 1-alpha/2]} percentile interval, i.e.
+#' twice the smaller of the two one-sided empirical tail proportions --
+#' the direct percentile analogue of \code{.bca_pvalue} (same call
+#' signature, including the otherwise-unused acceleration constant
+#' \code{a}, for the same drop-in-alternative reason as
+#' \code{.percentile_ci}).
+#'
+#' @param theta0 the null/hypothesised value to test against
+#' @param theta_boot numeric vector of bootstrap replicate values
+#' @param theta_hat unused; present only for interface parity with
+#'   \code{.bca_pvalue}
+#' @param a unused; present only for interface parity with
+#'   \code{.bca_pvalue}
+#' @param alternative one of \code{"two.sided"}, \code{"less"},
+#'   \code{"greater"}
+#' @keywords internal
+#' @noRd
+.percentile_pvalue <- function(theta0, theta_boot, theta_hat = NULL, a = NULL,
+                                alternative = "two.sided") {
+  p_le <- mean(theta_boot <= theta0)   # empirical P(replicate <= theta0)
+  p_ge <- mean(theta_boot >= theta0)   # empirical P(replicate >= theta0)
+  p <- switch(alternative,
+              two.sided = 2 * min(p_le, p_ge),
+              less      = p_ge,
+              greater   = p_le,
               stop("invalid 'alternative'"))
   min(max(p, 0), 1)
 }
@@ -278,7 +391,8 @@
 #' @param beta_hat named numeric vector, the full-data estimate
 #' @keywords internal
 #' @noRd
-.coef_bca_table <- function(boot_mat, loo_mat, beta_hat, conf.level = 0.95) {
+.coef_bca_table <- function(boot_mat, loo_mat, beta_hat, conf.level = 0.95,
+                             ci_fn = .bca_ci, pval_fn = .bca_pvalue) {
   p  <- length(beta_hat)
   nm <- names(beta_hat)
   ci   <- matrix(NA_real_, nrow = p, ncol = 2, dimnames = list(nm, c("lower", "upper")))
@@ -287,9 +401,9 @@
     ok <- stats::complete.cases(boot_mat[, j])
     tb <- boot_mat[ok, j]
     if (length(tb) < 10) next
-    out <- .bca_ci(tb, beta_hat[j], loo_mat[, j], conf.level)
+    out <- ci_fn(tb, beta_hat[j], loo_mat[, j], conf.level)
     ci[j, ] <- as.numeric(out)
-    pval[j] <- .bca_pvalue(0, tb, beta_hat[j], attr(out, "a"), "two.sided")
+    pval[j] <- pval_fn(0, tb, beta_hat[j], attr(out, "a"), "two.sided")
   }
   list(conf.int = ci, p.value = pval)
 }
@@ -538,6 +652,104 @@
   } else {
     pr_loo
   }
+}
+
+#' Fully vectorized wild-bootstrap engine for boot.lm(). Unlike case
+#' resampling, the wild bootstrap keeps the design matrix X fixed across
+#' every replicate and only perturbs the fitted model's own residuals:
+#' \code{y*_i = fitted_i + v_i * (y_i - fitted_i)}, where \code{v_i} are
+#' i.i.d. mean-0, variance-1 multipliers (see \code{.wild_weights}).
+#' Because X never changes, X'X (and hence its one-time Cholesky
+#' factorization/hat-matrix diagonal) is reused for *every* replicate --
+#' unlike case resampling, which must redo a Cholesky solve per
+#' replicate since Xb changes every time -- so the entire R-replicate
+#' bootstrap reduces to a handful of full-matrix operations (one
+#' `crossprod()`, one double `backsolve()` handling all R right-hand
+#' sides at once, and elementwise arithmetic on n x R / R-length
+#' objects) with **no explicit loop over replicates at all**. This is
+#' the main speed advantage of the wild bootstrap in this package.
+#'
+#' The leave-one-out predictions needed for \code{pred.r.squared} are
+#' obtained the same way: since the hat values \code{h_i = x_i'(X'X)^{-1}x_i}
+#' are also fixed across replicates, the closed-form OLS identity
+#' \eqn{\hat y_{(-i)} = \hat y_i - h_i e_i / (1 - h_i)} (the same
+#' leave-one-out formula used elsewhere in this file, just applied
+#' directly to *predictions* rather than *coefficients*) gives every
+#' replicate's full leave-one-out prediction vector in one more
+#' elementwise expression -- no per-replicate leave-one-out coefficient
+#' matrix is needed at all here, unlike the case-resampling path.
+#'
+#' @param X,y (weighted, offset-adjusted) design matrix / response
+#' @param R number of bootstrap replicates
+#' @param XtX_inv \code{(X'X)^{-1}}, already computed once by the caller
+#' @param beta_hat full-data OLS coefficients
+#' @param ch Cholesky factor of \code{X'X} if available (\code{NULL} if
+#'   \code{X'X} was singular and the caller fell back to a generalized
+#'   inverse for \code{XtX_inv}, in which case a direct -- still fully
+#'   vectorized -- matrix solve is used instead of the backsolve)
+#' @param wild.dist multiplier distribution, see \code{.wild_weights}
+#' @param need_pred_loo whether to also return the n x R matrix of
+#'   leave-one-out predictions (only needed for \code{pred.r.squared};
+#'   skipped by default to save the memory/time when not requested)
+#' @return a list: \code{boot_coef} (R x p), \code{t_mat} (R x p,
+#'   per-replicate t-statistics), \code{r2} (length R), \code{tss}
+#'   (length R), \code{Ystar} (n x R), \code{pred_loo} (n x R, or
+#'   \code{NULL}), \code{df_resid}
+#' @keywords internal
+#' @noRd
+.wild_lm_core <- function(X, y, R, XtX_inv, beta_hat, ch = NULL,
+                           wild.dist = c("rademacher", "mammen", "normal"),
+                           need_pred_loo = FALSE) {
+  wild.dist <- match.arg(wild.dist)
+  n <- nrow(X); p <- ncol(X)
+  has_icpt <- identical(colnames(X)[1L], "(Intercept)")
+  df_resid <- n - p
+
+  fitted_full <- as.vector(X %*% beta_hat)
+  resid_full  <- y - fitted_full
+
+  V <- .wild_weights(n, R, wild.dist)              # n x R
+  Ystar <- fitted_full + V * resid_full            # n x R (row-recycled)
+
+  XtY_all <- crossprod(X, Ystar)                   # p x R
+  beta_all <- if (!is.null(ch)) {
+    backsolve(ch, backsolve(ch, XtY_all, transpose = TRUE))
+  } else {
+    XtX_inv %*% XtY_all
+  }                                                  # p x R -- ALL replicates at once
+
+  Fitted_all <- X %*% beta_all                     # n x R
+  Resid_all  <- Ystar - Fitted_all                 # n x R
+  rss_all <- colSums(Resid_all^2)                  # length R
+
+  tss_all <- if (has_icpt) {
+    colSums(scale(Ystar, center = TRUE, scale = FALSE)^2)
+  } else {
+    colSums(Ystar^2)
+  }
+  r2_all <- ifelse(tss_all > 0, 1 - rss_all / tss_all, NA_real_)      # length R
+
+  sigma2_all <- ifelse(rss_all > 0 & df_resid > 0, rss_all / df_resid, NA_real_)
+  diagXtXinv <- diag(XtX_inv)                       # length p
+  se_all <- sqrt(outer(sigma2_all, diagXtXinv))     # R x p: se[b,j] = sqrt(sigma2[b]*diag[j])
+  t_all  <- t(beta_all) / se_all                    # R x p
+
+  pred_loo <- NULL
+  if (need_pred_loo) {
+    h <- rowSums((X %*% XtX_inv) * X)               # length n, fixed across replicates
+    h <- pmin(h, 1 - 1e-10)
+    pred_loo <- Fitted_all - (h * Resid_all) / (1 - h)  # n x R
+  }
+
+  list(
+    boot_coef = t(beta_all),  # R x p
+    t_mat     = t_all,        # R x p
+    r2        = r2_all,       # length R
+    tss       = tss_all,      # length R
+    Ystar     = Ystar,        # n x R
+    pred_loo  = pred_loo,     # n x R or NULL
+    df_resid  = df_resid
+  )
 }
 
 #' Fast case-resampling bootstrap of a marginal risk ratio or risk
@@ -984,6 +1196,82 @@
   XtXinvXt <- X %*% XtWX_inv
   delta <- (w * z_resid / (1 - h)) * XtXinvXt
   sweep(-delta, 2, beta_hat, "+")
+}
+
+#' Fully vectorized "linearized one-step" wild-bootstrap engine for
+#' boot.glm(). The classical wild bootstrap (perturb residuals, keep X
+#' fixed) is native to linear regression; for a GLM there is no single
+#' standard extension, because for a family like \code{binomial()} a
+#' perturbed *response* \eqn{y^*_i = \mu_i + v_i(y_i-\mu_i)} generally
+#' falls outside \eqn{\{0,1\}} (or even outside \eqn{[0,1]}), so it
+#' cannot be handed back to a fresh IRLS refit. Instead, this perturbs
+#' the residual of the IRLS *working response* at convergence,
+#' \eqn{z_i = \eta_i + (y_i-\mu_i)/g'(\mu_i)} (well-defined for any
+#' family/link), and solves **one** weighted-least-squares step using
+#' the *converged* IRLS weights \code{fit$weights} -- i.e. it linearizes
+#' the model around the full-data fit rather than running a fresh
+#' nonlinear IRLS refit per replicate. This is deliberately an
+#' approximation (a full case-resampling refit, via \code{boot.method =
+#' "case"}, remains available whenever an exact nonlinear refit per
+#' replicate is preferred), but it is well-defined for every GLM family
+#' and link, and -- because the IRLS weights and hence the weighted
+#' design are fixed across replicates -- the *entire* R-replicate
+#' bootstrap again reduces to a handful of full-matrix operations with
+#' no explicit loop over replicates, exactly as in \code{.wild_lm_core}:
+#' the constant part of the weighted normal equations' right-hand side
+#' (from the unperturbed \eqn{\eta}) is computed once, and only the
+#' perturbation part needs a per-replicate contribution, computed for
+#' all R replicates in one \code{crossprod()} call.
+#'
+#' @param X (unweighted) design matrix
+#' @param y response used by the fit (already resolved to numeric 0/1
+#'   for a factor/logical binomial response, as elsewhere in this file)
+#' @param R number of bootstrap replicates
+#' @param fit the converged \code{glm} object (for \code{fit$weights},
+#'   \code{fit$linear.predictors}, \code{fit$fitted.values},
+#'   \code{fit$family})
+#' @param wild.dist multiplier distribution, see \code{.wild_weights}
+#' @return a list: \code{boot_coef} (R x p, for the same
+#'   \code{.coef_bca_table}-style consumption as \code{.boot_glm_coef}'s
+#'   output), \code{beta_all} (p x R, for g-computation-style downstream
+#'   use where predictions are needed under counterfactual design
+#'   matrices), \code{XtWX_inv} (the fixed weighted-crossproduct inverse)
+#' @keywords internal
+#' @noRd
+.wild_glm_core <- function(X, y, R, fit,
+                            wild.dist = c("rademacher", "mammen", "normal")) {
+  wild.dist <- match.arg(wild.dist)
+  n <- nrow(X); p <- ncol(X)
+
+  w   <- fit$weights                     # IRLS working weights at convergence
+  eta <- fit$linear.predictors           # already includes any offset
+  mu  <- fit$fitted.values
+  fam <- fit$family
+  mu.eta <- fam$mu.eta(eta)
+  z_resid <- (y - mu) / ifelse(mu.eta == 0, .Machine$double.eps, mu.eta)
+
+  sw <- sqrt(w)
+  Xw <- X * sw                            # weighted design, fixed across replicates
+  ch <- tryCatch(chol(crossprod(Xw)), error = function(e) NULL)
+  XtWX_inv <- if (!is.null(ch)) chol2inv(ch) else MASS_ginv_fallback(crossprod(Xw))
+
+  V <- .wild_weights(n, R, wild.dist)     # n x R
+
+  ## weighted normal-equations RHS, X'W z*_b, split into a constant part
+  ## (from the unperturbed eta) computed once, plus a per-replicate part
+  ## (from the perturbed working residual) computed for all R replicates
+  ## in a single crossprod() call
+  const_term <- as.vector(crossprod(Xw, sw * eta))         # length p, fixed
+  XtWz_resid_all <- crossprod(Xw, sw * (V * z_resid))       # p x R
+  XtWz_all <- const_term + XtWz_resid_all                   # p x R (const_term row-recycled)
+
+  beta_all <- if (!is.null(ch)) {
+    backsolve(ch, backsolve(ch, XtWz_all, transpose = TRUE))
+  } else {
+    XtWX_inv %*% XtWz_all
+  }                                                          # p x R -- ALL replicates at once
+
+  list(boot_coef = t(beta_all), beta_all = beta_all, XtWX_inv = XtWX_inv)
 }
 
 #' Fallback generalized inverse (base R only) used only if a crossproduct

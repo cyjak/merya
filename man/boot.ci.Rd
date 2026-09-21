@@ -45,9 +45,11 @@ boot.ci(object, \dots)
     (no reseeding), or any other integer for a different reproducible
     draw.}
   \item{\dots}{further arguments forwarded to the underlying
-    \code{boot.*} function (e.g. \code{irls.maxit}/\code{irls.tol}/
-    \code{effect}/\code{exposure} for \code{glm}, or \code{effect} for
-    \code{lm}).}
+    \code{boot.*} function -- e.g. \code{boot.method}, \code{wild.dist},
+    \code{ci.type} (all three, see \code{\link{boot.lm}}), and
+    \code{effect} for every method; \code{paired} for the \code{htest}
+    method; \code{irls.maxit}/\code{irls.tol}/\code{exposure} for
+    \code{glm}.}
 }
 \value{
 An object of the \strong{same class, and in the same format}, as

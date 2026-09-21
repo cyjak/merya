@@ -2,12 +2,12 @@
 #'
 #' Fits a generalized linear model exactly as \code{\link[stats]{glm}}
 #' does (same formula interface, same fitted \code{"glm"} object), but
-#' additionally performs a case-resampling bootstrap and attaches
-#' bias-corrected and accelerated (BCa) confidence intervals and
-#' CI-inversion p-values, retrievable via \code{summary()}. By default the
-#' bootstrapped quantity is the model coefficients (as before); \code{effect}
-#' can instead request odds ratios, risk ratios/differences, or the
-#' population attributable fraction -- see Details.
+#' additionally performs a bootstrap and attaches bias-corrected and
+#' accelerated (BCa) confidence intervals and CI-inversion p-values,
+#' retrievable via \code{summary()}. By default the bootstrapped quantity
+#' is the model coefficients (as before); \code{effect} can instead
+#' request odds ratios, risk ratios/differences, or the population
+#' attributable fraction -- see Details.
 #'
 #' @param formula an object of class \code{"formula"}, as in \code{glm}.
 #' @param family as in \code{\link[stats]{glm}} (e.g. \code{binomial()},
@@ -16,17 +16,44 @@
 #' @param subset,weights,na.action,offset as in \code{\link[stats]{glm}}.
 #' @param conf.level confidence level for the bootstrap intervals.
 #' @param R number of bootstrap replicates. Default \code{10000}.
+#' @param boot.method resampling method: \code{"wild"} (default) or
+#'   \code{"case"}. \code{"wild"} keeps the design matrix fixed and
+#'   perturbs the residual of the IRLS working response at convergence by
+#'   an independent random multiplier (see \code{wild.dist}), then solves
+#'   *one* weighted-least-squares step per replicate using the converged
+#'   IRLS weights -- i.e. it linearizes the model around the full-data
+#'   fit rather than running a fresh nonlinear IRLS refit; this is
+#'   well-defined for any family/link (unlike a response-scale wild
+#'   bootstrap, which cannot generally be defined for e.g.
+#'   \code{binomial()}) and, because the weighted design is fixed across
+#'   replicates, needs no explicit loop over replicates at all, making it
+#'   both the default and the faster option in most cases. \code{"case"}
+#'   is the classical resample-the-rows-with-replacement bootstrap (a
+#'   full nonlinear IRLS refit per replicate) used by every earlier
+#'   version of this function; it remains available whenever an exact
+#'   nonlinear refit per replicate, or resampling the covariate
+#'   distribution itself, is preferred.
+#' @param wild.dist distribution of the wild-bootstrap multipliers
+#'   \eqn{v_i} (only used when \code{boot.method = "wild"}): see
+#'   \code{\link{boot.lm}}.
+#' @param ci.type how the confidence interval (and, by CI inversion, the
+#'   p-value) is obtained from the bootstrap distribution: \code{"bca"}
+#'   (default) or \code{"percentile"}; see \code{\link{boot.lm}}. Applies
+#'   uniformly regardless of \code{boot.method} or \code{effect}.
 #' @param seed integer seed used to make the bootstrap resampling
 #'   reproducible; set via \code{\link[base]{set.seed}} at the start of
 #'   the function. Defaults to \code{123}; pass \code{NULL} to use
 #'   whatever random state is currently active (no reseeding), or any
 #'   other integer for a different reproducible draw.
 #' @param irls.maxit maximum number of IRLS (Newton) iterations per
-#'   bootstrap replicate. Default \code{25}; in practice, because each
-#'   replicate is warm-started from the full-data MLE, convergence is
-#'   typically reached in a handful of iterations.
+#'   bootstrap replicate when \code{boot.method = "case"}. Default
+#'   \code{25}; in practice, because each replicate is warm-started from
+#'   the full-data MLE, convergence is typically reached in a handful of
+#'   iterations. Unused when \code{boot.method = "wild"}, which performs
+#'   one linearized step rather than an iterative refit.
 #' @param irls.tol relative convergence tolerance on the coefficient
-#'   update between IRLS iterations. Default \code{1e-8}.
+#'   update between IRLS iterations when \code{boot.method = "case"}.
+#'   Default \code{1e-8}. Unused when \code{boot.method = "wild"}.
 #' @param effect which quantity to bootstrap and report:
 #'   \describe{
 #'     \item{\code{"coef"}}{(default) the ordinary model coefficients.}
@@ -62,35 +89,74 @@
 #' @return An object of class \code{c("boot.glm", "glm", "lm")}: identical
 #'   to what \code{\link[stats]{glm}} returns, with an additional
 #'   \code{boot} element (the bootstrap replicates of whichever quantity
-#'   \code{effect} selected, its BCa CI(s), CI-inversion p-value(s),
-#'   \code{R}, and \code{effect} itself). All standard \code{glm} methods
-#'   keep working unchanged, regardless of \code{effect}; use
-#'   \code{summary()} for the bootstrap inference table (columns
-#'   \code{Estimate}, \code{CI lower}, \code{CI upper}, and
-#'   \code{Pr(>|z|)}; no separate bootstrap standard error column).
+#'   \code{effect} selected, its BCa/percentile CI(s), CI-inversion
+#'   p-value(s), \code{R}, \code{boot.method}, and \code{effect} itself).
+#'   All standard \code{glm} methods keep working unchanged, regardless
+#'   of \code{effect} or \code{boot.method}; use \code{summary()} for the
+#'   bootstrap inference table (columns \code{Estimate}, \code{CI lower},
+#'   \code{CI upper}, and \code{Pr(>|z|)}; no separate bootstrap standard
+#'   error column).
 #'
-#' @details \strong{\code{effect = "coef"}} (default): each bootstrap
-#'   replicate is refit with a lean, hand-rolled IRLS solver (not
+#' @details \strong{\code{boot.method = "wild"}} (default): perturbs the
+#'   residual of the IRLS working response at convergence,
+#'   \eqn{z_i = \eta_i + (y_i-\mu_i)/g'(\mu_i)}, by an independent random
+#'   multiplier \eqn{v_i} (see \code{wild.dist}), and solves *one*
+#'   weighted-least-squares step using the fixed, converged IRLS weights
+#'   -- i.e. it linearizes the model around the full-data fit rather than
+#'   running a fresh nonlinear IRLS refit per replicate. Because the
+#'   weighted design is fixed across replicates, the entire
+#'   \code{R}-replicate bootstrap for the coefficients reduces to a
+#'   handful of full-matrix operations with no explicit loop over
+#'   replicates, exactly as for \code{\link{boot.lm}}'s wild bootstrap.
+#'   For the g-computation effects (\code{"RR"}/\code{"RD"} with
+#'   \code{exposure}, and \code{"PAF"}), the standardization step (which
+#'   under \code{"case"} must be redone within each replicate's own
+#'   resampled covariate distribution) instead uses the fixed, full
+#'   covariate distribution together with each replicate's own
+#'   coefficients, which is again fully vectorized across all \code{R}
+#'   replicates at once. For \code{"PAF"} specifically, the *observed*
+#'   prevalence used as the denominator does not vary under wild
+#'   bootstrap (there is no resampled response for it to be computed
+#'   from, since only the model's residuals are perturbed) and is held
+#'   fixed at the full-sample value for every replicate; only the
+#'   model-based counterfactual prevalence -- the part that actually
+#'   depends on the fitted coefficients -- varies per replicate.
+#'
+#'   \strong{\code{boot.method = "case"}}: each bootstrap replicate is
+#'   refit with a lean, hand-rolled IRLS solver (not
 #'   \code{stats::glm.fit()}), warm-started from the full-data MLE
-#'   coefficients, converging in a handful of iterations. The
-#'   acceleration constant for the BCa interval is approximated from a
-#'   one-step Newton (infinitesimal jackknife) update using the converged
-#'   IRLS working weights, avoiding n full leave-one-out refits.
+#'   coefficients, converging in a handful of iterations. For the
+#'   g-computation effects, the standardization step is repeated within
+#'   that same replicate's own resampled covariate distribution.
+#'
+#'   For \strong{both} \code{boot.method}s, the BCa acceleration constant
+#'   is approximated from a one-step Newton (infinitesimal jackknife)
+#'   update on the original, unperturbed sample, using the converged
+#'   IRLS working weights, avoiding \code{n} full leave-one-out refits;
+#'   this jackknife's role (estimating the curvature/skewness of the
+#'   estimator's sampling distribution) does not depend on which
+#'   resampling scheme generates the main bootstrap distribution, so it
+#'   is shared rather than duplicated (for \code{"PAF"}'s
+#'   continuous-predictor recipes, the reference value used in this
+#'   jackknife step is additionally fixed at the full-data mean rather
+#'   than recomputed per leave-one-out pseudo-replicate, keeping the
+#'   computation fully vectorized).
 #'
 #'   \strong{\code{effect = "OR"}} and the conditional-risk-ratio form of
 #'   \strong{\code{effect = "RR"}} (\code{exposure = NULL}): these reuse
 #'   the identical bootstrap/jackknife coefficient replicates as
 #'   \code{"coef"} -- no separate resampling is done -- and simply report
 #'   \code{exp(estimate)}/\code{exp(CI)} instead of the raw coefficient
-#'   and its CI. Because the BCa interval's endpoints are specific
-#'   (bias-and-acceleration-corrected) quantiles of the bootstrap
-#'   distribution, and \code{exp()} is monotonic, exponentiating those
-#'   endpoints gives the exact corresponding BCa interval on the
-#'   OR/RR scale -- there is no need to (and this does not) rebuild the
-#'   BCa calculation from an exponentiated bootstrap distribution. The
-#'   p-value is left as computed on the coefficient scale (testing
-#'   coefficient = 0, equivalently OR/RR = 1), since exponentiation does
-#'   not change which side of the null a replicate falls on.
+#'   and its CI. Because the interval's endpoints are specific quantiles
+#'   of the bootstrap distribution (BCa: bias-and-acceleration-corrected
+#'   quantiles; percentile: plain empirical quantiles) and \code{exp()}
+#'   is monotonic, exponentiating those endpoints gives the exact
+#'   corresponding interval on the OR/RR scale either way -- there is no
+#'   need to (and this does not) rebuild the interval from an
+#'   exponentiated bootstrap distribution. The p-value is left as
+#'   computed on the coefficient scale (testing coefficient = 0,
+#'   equivalently OR/RR = 1), since exponentiation does not change which
+#'   side of the null a replicate falls on.
 #'
 #'   \strong{The g-computation form of \code{effect = "RR"}}
 #'   (\code{exposure} given) \strong{, \code{effect = "RD"}, and
@@ -117,21 +183,7 @@
 #'   such as \code{poly()}/\code{log()} raise an error). \code{"PAF"}
 #'   works whether or not \code{data} is supplied (formula variables may
 #'   instead live in the calling environment, as for \code{glm()}
-#'   itself).
-#'
-#'   For all three g-computation cases, each bootstrap replicate
-#'   resamples whole rows (outcome and covariates together), refits the
-#'   same lean IRLS solver used for \code{"coef"}, and repeats the
-#'   standardization step within that replicate's own resampled
-#'   covariate distribution and refit coefficients -- the standard
-#'   nonparametric bootstrap for a g-computed effect. The BCa
-#'   acceleration constant uses a closed-form (no-refit) leave-one-out
-#'   approximation built from the same one-step Newton update used for
-#'   \code{"coef"} (for \code{"PAF"}'s continuous-predictor recipes, the
-#'   reference value used in this jackknife step is fixed at the
-#'   full-data mean rather than recomputed per leave-one-out pseudo-
-#'   replicate -- a small approximation that keeps the computation fully
-#'   vectorized). The p-value is obtained by CI inversion against the
+#'   itself). The p-value is obtained by CI inversion against the
 #'   natural null value for each scale (1 for the risk ratio, 0 for the
 #'   risk difference or the attributable fraction). \code{exposure} must
 #'   resolve to exactly one design-matrix column (a plain 0/1
@@ -143,6 +195,11 @@
 #' @examples
 #' fit <- boot.glm(am ~ wt + hp, data = mtcars, family = binomial(), R = 500)
 #' summary(fit)
+#'
+#' ## the classical case-resampling bootstrap, instead of the wild-
+#' ## bootstrap default
+#' summary(boot.glm(am ~ wt + hp, data = mtcars, family = binomial(),
+#'                   R = 500, boot.method = "case"))
 #'
 #' ## odds ratios (requires a logit link)
 #' summary(boot.glm(am ~ wt + hp, data = mtcars, family = binomial(),
@@ -169,11 +226,20 @@
 boot.glm <- function(formula, family = stats::gaussian(), data, subset,
                       weights, na.action, offset,
                       conf.level = 0.95, R = 10000,
+                      boot.method = c("wild", "case"),
+                      wild.dist = c("rademacher", "mammen", "normal"),
+                      ci.type = c("bca", "percentile"),
+                      seed = 123,
                       irls.maxit = 25L, irls.tol = 1e-8,
                       effect = c("coef", "OR", "RR", "RD", "PAF"),
-                      exposure = NULL, seed = 123, ...) {
+                      exposure = NULL, ...) {
   if (!is.null(seed)) set.seed(seed)
+  boot.method <- match.arg(boot.method)
+  wild.dist <- match.arg(wild.dist)
+  ci.type <- match.arg(ci.type)
   effect <- match.arg(effect)
+  ci_fn   <- if (ci.type == "bca") .bca_ci else .percentile_ci
+  pval_fn <- if (ci.type == "bca") .bca_pvalue else .percentile_pvalue
   cl <- match.call()
   mf <- match.call(expand.dots = FALSE)
   m <- match(c("formula", "data", "subset", "weights", "na.action", "offset"),
@@ -240,6 +306,9 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
   glm_call[[1L]] <- quote(stats::glm)
   glm_call$conf.level <- NULL
   glm_call$R <- NULL
+  glm_call$boot.method <- NULL
+  glm_call$wild.dist <- NULL
+  glm_call$ci.type <- NULL
   glm_call$irls.maxit <- NULL
   glm_call$irls.tol <- NULL
   glm_call$effect <- NULL
@@ -257,20 +326,35 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
   ww <- if (is.null(w)) rep(1, n) else w
   oo <- if (is.null(off)) rep(0, n) else off
 
+  ## For boot.method = "wild", the coefficient bootstrap is a single
+  ## vectorized call regardless of which effect is requested downstream
+  ## (X is fixed, so there is no reason to redraw per option).
+  wc <- if (boot.method == "wild") {
+    .wild_glm_core(X, yy, R, fit, wild.dist)
+  } else {
+    NULL
+  }
+
   if (effect %in% c("coef", "OR") || use_direct_rr) {
     ## "coef", "OR", and the direct (no-exposure) form of "RR" all bootstrap
     ## the exact same coefficient replicates; only the final reporting scale
     ## (raw vs. exponentiated) differs, and the p-value is always computed
     ## on the coefficient scale.
-    boot_coef <- .boot_glm_coef(X, yy, R, family, weights = ww, offset = oo,
-                                 start = beta_hat, irls.maxit = irls.maxit,
-                                 irls.tol = irls.tol)
+    boot_coef <- if (boot.method == "wild") {
+      wc$boot_coef
+    } else {
+      .boot_glm_coef(X, yy, R, family, weights = ww, offset = oo,
+                      start = beta_hat, irls.maxit = irls.maxit,
+                      irls.tol = irls.tol)
+    }
     loo_coef <- .jack_glm_coef(X, yy, fit)
-    tbl <- .coef_bca_table(boot_coef, loo_coef, beta_hat, conf.level)
+    tbl <- .coef_bca_table(boot_coef, loo_coef, beta_hat, conf.level, ci_fn, pval_fn)
 
     if (effect == "coef") {
       fit$boot <- list(
         effect       = "coef",
+        boot.method  = boot.method,
+        ci.type      = ci.type,
         coefficients = boot_coef,
         conf.int     = tbl$conf.int,
         p.value      = tbl$p.value,
@@ -280,6 +364,8 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
     } else {
       fit$boot <- list(
         effect       = effect,
+        boot.method  = boot.method,
+        ci.type      = ci.type,
         method       = "direct",
         coefficients = boot_coef,
         estimate     = exp(beta_hat),
@@ -325,10 +411,20 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
     R1_hat <- mean(p1_hat); R0_hat <- mean(p0_hat)
     theta_hat <- if (gc_effect == "rr") R1_hat / R0_hat else R1_hat - R0_hat
 
-    boot_stat <- .boot_glm_gcomp(X, yy, R, family, weights = ww, offset = oo,
-                                  start = beta_hat, irls.maxit = irls.maxit,
-                                  irls.tol = irls.tol, expo_col = expo_col,
-                                  effect = gc_effect)
+    boot_stat <- if (boot.method == "wild") {
+      ## fully vectorized: standardize over the FIXED, full covariate
+      ## distribution using every replicate's own (linearized) coefficients
+      Eta1_all <- X1 %*% wc$beta_all + oo   # n x R (oo row-recycled)
+      Eta0_all <- X0 %*% wc$beta_all + oo
+      R1_all <- colMeans(family$linkinv(Eta1_all))
+      R0_all <- colMeans(family$linkinv(Eta0_all))
+      if (gc_effect == "rr") R1_all / R0_all else R1_all - R0_all
+    } else {
+      .boot_glm_gcomp(X, yy, R, family, weights = ww, offset = oo,
+                       start = beta_hat, irls.maxit = irls.maxit,
+                       irls.tol = irls.tol, expo_col = expo_col,
+                       effect = gc_effect)
+    }
     loo_beta <- .jack_glm_coef(X, yy, fit)
     loo_stat <- .jack_glm_gcomp(X, loo_beta, expo_col, family$linkinv, gc_effect,
                                  offset = oo)
@@ -339,10 +435,10 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
       ci <- c(NA_real_, NA_real_)
       pval_val <- NA_real_
     } else {
-      out <- .bca_ci(tb, theta_hat, loo_stat, conf.level)
+      out <- ci_fn(tb, theta_hat, loo_stat, conf.level)
       ci <- as.numeric(out)
       null_val <- if (gc_effect == "rr") 1 else 0
-      pval_val <- .bca_pvalue(null_val, tb, theta_hat, attr(out, "a"), "two.sided")
+      pval_val <- pval_fn(null_val, tb, theta_hat, attr(out, "a"), "two.sided")
     }
     nm <- exposure
     ci <- matrix(ci, nrow = 1L, ncol = 2, dimnames = list(nm, c("lower", "upper")))
@@ -351,6 +447,8 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
 
     fit$boot <- list(
       effect       = effect,
+      boot.method  = boot.method,
+      ci.type      = ci.type,
       method       = "gcomputation",
       exposure     = exposure,
       coefficients = matrix(boot_stat, ncol = 1L, dimnames = list(NULL, nm)),
@@ -381,9 +479,29 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
       est[kk] <- (p_true_hat - p_cf_hat) / p_true_hat
     }
 
-    boot_stat <- .boot_glm_paf(X, yy, R, family, weights = ww, offset = oo,
-                                start = beta_hat, irls.maxit = irls.maxit,
-                                irls.tol = irls.tol, recipes = recipes)
+    boot_stat <- if (boot.method == "wild") {
+      ## The observed prevalence has no wild-bootstrap analogue (only the
+      ## model's residuals are perturbed, not the response itself), so it
+      ## is held fixed at the full-sample value for every replicate; only
+      ## the model-based counterfactual prevalence varies, via each
+      ## replicate's own coefficients -- fully vectorized across recipes
+      ## and replicates (see Details).
+      out_mat <- matrix(NA_real_, nrow = R, ncol = k)
+      for (kk in seq_len(k)) {
+        rec <- recipes[[kk]]
+        Xcf <- X
+        if (rec$type == "categorical") Xcf[, rec$cols] <- 0
+        else Xcf[, rec$cols] <- mean(X[, rec$cols])
+        Eta_cf_all <- Xcf %*% wc$beta_all + oo             # n x R
+        p_cf_all <- colMeans(family$linkinv(Eta_cf_all))    # length R
+        out_mat[, kk] <- (p_true_hat - p_cf_all) / p_true_hat
+      }
+      out_mat
+    } else {
+      .boot_glm_paf(X, yy, R, family, weights = ww, offset = oo,
+                    start = beta_hat, irls.maxit = irls.maxit,
+                    irls.tol = irls.tol, recipes = recipes)
+    }
 
     loo_beta <- .jack_glm_coef(X, yy, fit)
     loo_cf <- .jack_glm_cf_prevalence(X, loo_beta, family$linkinv, recipes,
@@ -398,13 +516,15 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
       ok <- stats::complete.cases(boot_stat[, kk])
       tb <- boot_stat[ok, kk]
       if (length(tb) < 10) { ci[kk, ] <- c(NA, NA); pval[kk] <- NA; next }
-      out <- .bca_ci(tb, est[kk], loo_stat[, kk], conf.level)
+      out <- ci_fn(tb, est[kk], loo_stat[, kk], conf.level)
       ci[kk, ] <- as.numeric(out)
-      pval[kk] <- .bca_pvalue(0, tb, est[kk], attr(out, "a"), "two.sided")
+      pval[kk] <- pval_fn(0, tb, est[kk], attr(out, "a"), "two.sided")
     }
 
     fit$boot <- list(
       effect       = "PAF",
+      boot.method  = boot.method,
+      ci.type      = ci.type,
       method       = "gcomputation",
       coefficients = boot_stat,
       estimate     = est,
@@ -414,6 +534,10 @@ boot.glm <- function(formula, family = stats::gaussian(), data, subset,
       R            = R
     )
   }
+
+  fit$boot$boot.method <- boot.method
+  fit$boot$ci.type <- ci.type
+  if (boot.method == "wild") fit$boot$wild.dist <- wild.dist
 
   class(fit) <- c("boot.glm", class(fit))
   fit
@@ -450,6 +574,9 @@ summary.boot.glm <- function(object, ...) {
   s$effect <- effect
   s$method <- b$method
   s$exposure <- b$exposure
+  s$boot.method <- b$boot.method
+  s$wild.dist <- b$wild.dist
+  s$ci.type <- if (is.null(b$ci.type)) "bca" else b$ci.type
   class(s) <- c("summary.boot.glm", class(s))
   s
 }
@@ -470,9 +597,15 @@ print.summary.boot.glm <- function(x, digits = max(3L, getOption("digits") - 3L)
     PAF  = "Population attributable fraction (g-computation)",
     "Coefficients"
   )
+  method_label <- if (identical(x$boot.method, "wild")) {
+    sprintf("wild bootstrap, %s multipliers", x$wild.dist)
+  } else {
+    "case-resampling bootstrap"
+  }
+  ci_label <- if (identical(x$ci.type, "percentile")) "percentile" else "BCa"
   cat(sprintf(
-    "\n%s (BCa bootstrap, R = %d, %.0f%% CI; p-values via CI inversion):\n",
-    eff_label, x$R, 100 * x$conf.level))
+    "\n%s (%s %s, R = %d, %.0f%% CI; p-values via CI inversion):\n",
+    eff_label, ci_label, method_label, x$R, 100 * x$conf.level))
   stats::printCoefmat(x$coefficients, digits = digits, has.Pvalue = TRUE,
                        cs.ind = 1L, tst.ind = integer(0), P.values = TRUE,
                        signif.stars = getOption("show.signif.stars", TRUE))

@@ -15,6 +15,15 @@ a fixed \code{seed = 123} for reproducibility (set \code{seed = NULL}
 to use whatever random state is currently active instead). The entire
 package depends only on base R (\code{stats}), with no
 other package dependencies.
+
+\code{\link{boot.lm}}, \code{\link{boot.glm}}, and \code{\link{boot.t.test}}
+default to a \strong{wild bootstrap} (\code{boot.method = "wild"}),
+which keeps the design matrix fixed and perturbs each observation's own
+residual, rather than resampling rows; the classical
+resample-the-rows-with-replacement bootstrap remains available via
+\code{boot.method = "case"}. Every bootstrap-based function also accepts
+\code{ci.type = "bca"} (default) or \code{"percentile"}, applied
+uniformly regardless of \code{boot.method}.
 }
 \details{
 The exported functions mirror the argument lists and return values of

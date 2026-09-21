@@ -11,7 +11,9 @@ interval at zero correlation (confidence-interval inversion testing).
 \usage{
 boot.cor.test(x, y, method = c("pearson", "kendall", "spearman"),
               alternative = c("two.sided", "less", "greater"),
-              conf.level = 0.95, R = 10000, seed = 123, \dots)
+              conf.level = 0.95, R = 10000,
+              ci.type = c("bca", "percentile"),
+              seed = 123, \dots)
 }
 \arguments{
   \item{x, y}{numeric vectors of the same length (at least 3 complete
@@ -22,6 +24,9 @@ boot.cor.test(x, y, method = c("pearson", "kendall", "spearman"),
     \code{"greater"} or \code{"less"}.}
   \item{conf.level}{confidence level for the returned interval.}
   \item{R}{number of bootstrap replicates (default \code{10000}).}
+  \item{ci.type}{how the confidence interval (and, by CI inversion, the
+    p-value) is obtained from the bootstrap distribution: \code{"bca"}
+    (default) or \code{"percentile"}; see \code{\link{boot.lm}}.}
   \item{seed}{integer seed used to make the bootstrap resampling
     reproducible; set via \code{\link[base]{set.seed}} at the start of
     the function. Defaults to \code{123}; pass \code{NULL} to use

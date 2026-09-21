@@ -17,6 +17,9 @@
 #'   \code{"less"}.
 #' @param conf.level confidence level for the returned confidence interval.
 #' @param R number of bootstrap replicates. Default \code{10000}.
+#' @param ci.type how the confidence interval (and, by CI inversion, the
+#'   p-value) is obtained from the bootstrap distribution: \code{"bca"}
+#'   (default) or \code{"percentile"}; see \code{\link{boot.lm}}.
 #' @param seed integer seed used to make the bootstrap resampling
 #'   reproducible; set via \code{\link[base]{set.seed}} at the start of
 #'   the function. Defaults to \code{123}; pass \code{NULL} to use
@@ -51,10 +54,15 @@
 boot.cor.test <- function(x, y,
                            method = c("pearson", "kendall", "spearman"),
                            alternative = c("two.sided", "less", "greater"),
-                           conf.level = 0.95, R = 10000, seed = 123, ...) {
+                           conf.level = 0.95, R = 10000,
+                           ci.type = c("bca", "percentile"),
+                           seed = 123, ...) {
   if (!is.null(seed)) set.seed(seed)
   method <- match.arg(method)
   alternative <- match.arg(alternative)
+  ci.type <- match.arg(ci.type)
+  ci_fn   <- if (ci.type == "bca") .bca_ci else .percentile_ci
+  pval_fn <- if (ci.type == "bca") .bca_pvalue else .percentile_pvalue
 
   dname <- paste(deparse(substitute(x)), "and", deparse(substitute(y)))
 
@@ -86,9 +94,9 @@ boot.cor.test <- function(x, y,
     method_name <- "Kendall's rank correlation tau"
   }
 
-  ci <- .bca_ci(theta_boot, theta_hat, theta_loo, conf.level)
+  ci <- ci_fn(theta_boot, theta_hat, theta_loo, conf.level)
   a  <- attr(ci, "a")
-  p.value <- .bca_pvalue(0, theta_boot, theta_hat, a, alternative)
+  p.value <- pval_fn(0, theta_boot, theta_hat, a, alternative)
 
   if (alternative == "less") {
     ci <- c(-1, ci[2])
@@ -133,10 +141,12 @@ boot.cor.test <- function(x, y,
     null.value  = null.value,
     alternative = alternative,
     method      = paste0(method_name, "'s product-moment correlation bootstrap test",
-                          "\n(BCa CI, CI-inversion p-value)"),
+                          sprintf("\n(%s CI, CI-inversion p-value)",
+                                  if (ci.type == "percentile") "percentile" else "BCa")),
     data.name   = dname,
     conf.int    = structure(ci, conf.level = conf.level),
-    R           = R
+    R           = R,
+    ci.type     = ci.type
   )
   class(out) <- "htest"
   out
